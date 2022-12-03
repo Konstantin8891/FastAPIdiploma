@@ -1,4 +1,4 @@
-from fastapi import APIRouter, status, Depends, HTTPException
+from fastapi import APIRouter, status, Depends, HTTPException, Security
 # from fastapi.security import OAuth2PasswordBearer
 from fastapi_pagination import add_pagination
 from fastapi_pagination.ext.sqlalchemy import paginate
@@ -14,7 +14,7 @@ sys.path.append('..')
 import models
 
 # from database import SessionLocal
-from schemas import Users, CurrentUser
+from schemas import Users, CurrentUser, SubscribeUser
 
 
 # oauth2_bearer = OAuth2PasswordBearer(tokenUrl="token")
@@ -40,7 +40,15 @@ async def get_all_users(db: Session = Depends(get_db)):
     return paginate(db.query(models.User).order_by(models.User.id))
 
 
-@router.get('/{user_id}/')
+@router.get('/me/')
+async def get_current_user(
+    user: dict = Security(get_user), db: Session = Depends(get_db)
+):
+    user_model = db.query(models.User).get(user.get('id'))
+    return user_model
+
+
+@router.get('/{user_id}')
 async def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if user is None:
@@ -48,8 +56,40 @@ async def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
     return user
 
 
-@router.get('/me/')
-async def get_current_user(user: dict = Depends(get_user), db: Session = Depends(get_db)):
-    user_model = db.query(models.User).get(user.get('id'))
-    print(user_model)
-    return user_model
+@router.post('/{author_id}/subscribe/', response_model=SubscribeUser)
+async def get_subscribed(
+    author_id: int,
+    recipe_limit: int,
+    user: dict = Security(get_user),
+    db: Session = Depends(get_db)
+):
+    author = db.query(models.User).get(author_id)
+    if author is None:
+        raise HTTPException(status_code=400, detail='au')
+    subscription = db.query(models.Subscriber).filter(
+        models.Subscriber.author_id == author_id
+    ).filter(models.Subscriber.user_id == user.get('id')).first()
+    if subscription is not None:
+        raise HTTPException(status_code=400, detail='already subscribed')
+    subscribe = models.Subscriber()
+    subscribe.author_id = author_id
+    subscribe.user_id = user.get('id')
+    db.add(subscribe)
+    db.commit()
+    recipes = db.query(models.Recipe).filter(
+        models.Recipe.author_id == author_id
+    )[:recipe_limit]
+    recipe_count = db.query(models.Recipe).filter(
+        models.Recipe.author_id == author_id
+    ).count()
+    user_instance = SubscribeUser(
+        email=author.email,
+        id=author_id,
+        username=author.username,
+        first_name=author.first_name,
+        last_name=author.last_name,
+        is_subscribed=True,
+        recipes=recipes,
+        recipe_count=recipe_count
+    )
+    return user_instance

@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta
+from fastapi.security import OAuth2AuthorizationCodeBearer, SecurityScopes
+
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import OAuth2PasswordBearer, OAuth2AuthorizationCodeBearer
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 
@@ -19,7 +21,8 @@ from schemas import CreateToken
 SECRET_KEY = "KlgH6AzYDeZeGwD288to79I3vTHT8wp7"
 ALGORITHM = "HS256"
 
-oauth2_bearer = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_bearer = OAuth2AuthorizationCodeBearer(authorizationUrl="token", tokenUrl="token")
+oauth2_bearer_optional = OAuth2AuthorizationCodeBearer(authorizationUrl="token", tokenUrl="token", auto_error=False)
 
 router = APIRouter(prefix='/api/auth', tags=['auth'])
 
@@ -32,10 +35,28 @@ def get_db():
         db.close()
 
 
-async def get_user(token: str = Depends(oauth2_bearer)):
+async def get_user_or_none(
+    security_scopes: SecurityScopes,
+    token: str = Depends(oauth2_bearer_optional)
+):
+    if token is None:
+        return None
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        print(payload)
+        email: str = payload.get("sub")
+        user_id: int = payload.get("id")
+        if email is None or user_id is None:
+            raise HTTPException(status_code=401, detail='User not found')
+        return {"email": email, "id": user_id}
+    except JWTError:
+        raise HTTPException(status_code=404, detail='User not found')
+
+
+async def get_user(
+    security_scopes: SecurityScopes, token: str = Depends(oauth2_bearer)
+):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
         user_id: int = payload.get("id")
         if email is None or user_id is None:

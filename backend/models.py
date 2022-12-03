@@ -16,6 +16,10 @@ class User(Base):
     password = Column(String)
 
     recipeuser = relationship('Recipe', back_populates='author')
+    favorites = relationship('Favorite', back_populates='user_f')
+    shoppingcart_u = relationship('ShoppingCart', back_populates='user_sc')
+    # subscriber_u = relationship('Subscriber', back_populates='user_s')
+    # subscriber_a = relationship('Subscriber', back_populates='user_a')
 
 
 IngredientRecipeRelation = Table(
@@ -68,6 +72,7 @@ class IngredientAmount(Base):
     __tablename__ = 'ingredient_amount'
     id = Column(Integer, primary_key=True, index=True)
     ingredient_id = Column(Integer, ForeignKey('ingredient.id'))
+    recipe_id = Column(Integer, ForeignKey('recipe.id'))
     amount = Column(Integer)
 
     ingredient = relationship('Ingredient', back_populates='ingredient_amount')
@@ -78,7 +83,6 @@ class Recipe(Base):
     id = Column(Integer, primary_key=True, index=True)
     text = Column(String)
     cooking_time = Column(Integer)
-    # image = Column(LargeBinary)
     image = Column(URLType)
     created = Column(DateTime)
     name = Column(String, unique=True)
@@ -97,3 +101,35 @@ class Recipe(Base):
     )
 
     author = relationship('User', back_populates='recipeuser')
+    favorites_r = relationship('Favorite', back_populates='recipe_f')
+    shoppingcart_r = relationship('ShoppingCart', back_populates='recipe_sc')
+
+
+class Favorite(Base):
+    __tablename__ = 'favorite'
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('user.id'))
+    recipe_id = Column(Integer, ForeignKey('recipe.id'))
+
+    user_f = relationship('User', back_populates='favorites')
+    recipe_f = relationship('Recipe', back_populates='favorites_r')
+
+
+class ShoppingCart(Base):
+    __tablename__ = 'shopping_cart'
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('user.id'))
+    recipe_id = Column(Integer, ForeignKey('recipe.id'))
+
+    user_sc = relationship('User', back_populates='shoppingcart_u')
+    recipe_sc = relationship('Recipe', back_populates='shoppingcart_r')
+
+
+# class Subscriber(Base):
+#     __tablename__ = 'subscription'
+#     id = Column(Integer, primary_key=True, index=True)
+#     user_id = Column(Integer, ForeignKey('user.id'))
+#     author_id = Column(Integer, ForeignKey('user.id'))
+
+#     user_s = relationship('User', back_populates='subscriber_u', foreign_keys=user_id)
+#     author_s = relationship('User', back_populates='subscriber_a', foreign_keys=author_id)

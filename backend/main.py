@@ -5,18 +5,18 @@ from fastapi_pagination import add_pagination
 from database import SessionLocal
 from routers import users, tags, ingredients, recipes, auth
 
+
+def configure_media(app): 
+    app.mount("/media", StaticFiles(directory="media"), name="media")
+
+
+def start_application():
+    app = FastAPI()
+    configure_media(app)
+    return app
+
+app = start_application()
 # app = FastAPI()
-
-# def configure_media(app): 
-#     app.mount("/media", StaticFiles(directory="media"), name="media")
-
-
-# def start_application():
-#     app = FastAPI()
-#     configure_media(app)
-#     return app
-
-app = FastAPI()
 app.mount("/media", StaticFiles(directory="media"), name="media")
 
 app.include_router(auth.router)
