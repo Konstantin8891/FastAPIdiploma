@@ -1,4 +1,4 @@
-from sqlalchemy import Integer, String, Boolean, ForeignKey, Column, DateTime, LargeBinary
+from sqlalchemy import Integer, String, Boolean, ForeignKey, Column, DateTime
 from sqlalchemy.schema import Table
 from sqlalchemy.orm import relationship
 
@@ -25,7 +25,7 @@ class User(Base):
 IngredientRecipeRelation = Table(
     'ingredient_recipe_relation',
     Base.metadata,
-    Column('ingredient_id', Integer, ForeignKey('ingredient.id')),
+    Column('ingredient_id', Integer, ForeignKey('ingredient_amount.id')),
     Column('recipe_id', Integer, ForeignKey('recipe.id'))
 )
 
@@ -51,19 +51,11 @@ class Tag(Base):
     )
 
 
-
 class Ingredient(Base):
     __tablename__ = 'ingredient'
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String)
     measurement_unit = Column(String)
-
-    recipes = relationship(
-        'Recipe',
-        secondary=IngredientRecipeRelation,
-        back_populates='ingredients',
-        cascade='all, delete'
-    )
 
     ingredient_amount = relationship('IngredientAmount', back_populates='ingredient')
 
@@ -77,6 +69,13 @@ class IngredientAmount(Base):
 
     ingredient = relationship('Ingredient', back_populates='ingredient_amount')
 
+    recipes = relationship(
+        'Recipe',
+        secondary=IngredientRecipeRelation,
+        back_populates='ingredients',
+        cascade='all, delete'
+    )
+
 
 class Recipe(Base):
     __tablename__ = 'recipe'
@@ -88,7 +87,7 @@ class Recipe(Base):
     name = Column(String, unique=True)
     author_id = Column(Integer, ForeignKey('user.id'))
     ingredients = relationship(
-        'Ingredient',
+        'IngredientAmount',
         secondary=IngredientRecipeRelation,
         back_populates='recipes',
         cascade='all, delete'

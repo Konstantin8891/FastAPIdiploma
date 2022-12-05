@@ -23,11 +23,11 @@ class CurrentUser(BaseModel):
         orm_mode = True
 
 
-class PostTags(BaseModel):
-    id: int
+# class PostTags(BaseModel):
+#     id: int
 
-    class Config:
-        orm_mode = True
+#     class Config:
+#         orm_mode = True
 
 
 class PostIngredients(BaseModel):
@@ -40,7 +40,7 @@ class PostIngredients(BaseModel):
 
 class PostRecipes(BaseModel):
     ingredients: list[PostIngredients]
-    tags: list[PostTags]
+    tags: list[int]
     image: str
     name: str
     text: str
