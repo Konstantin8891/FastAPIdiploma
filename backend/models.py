@@ -18,8 +18,6 @@ class User(Base):
     recipeuser = relationship('Recipe', back_populates='author')
     favorites = relationship('Favorite', back_populates='user_f')
     shoppingcart_u = relationship('ShoppingCart', back_populates='user_sc')
-    # subscriber_u = relationship('Subscriber', back_populates='user_s')
-    # subscriber_a = relationship('Subscriber', back_populates='user_a')
 
 
 IngredientRecipeRelation = Table(
@@ -124,11 +122,8 @@ class ShoppingCart(Base):
     recipe_sc = relationship('Recipe', back_populates='shoppingcart_r')
 
 
-# class Subscriber(Base):
-#     __tablename__ = 'subscription'
-#     id = Column(Integer, primary_key=True, index=True)
-#     user_id = Column(Integer, ForeignKey('user.id'))
-#     author_id = Column(Integer, ForeignKey('user.id'))
-
-#     user_s = relationship('User', back_populates='subscriber_u', foreign_keys=user_id)
-#     author_s = relationship('User', back_populates='subscriber_a', foreign_keys=author_id)
+class Subscriber(Base):
+    __tablename__ = 'subscriber'
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('user.id'))
+    author_id = Column(Integer, ForeignKey('user.id'))

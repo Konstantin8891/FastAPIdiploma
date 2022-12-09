@@ -65,7 +65,7 @@ async def get_subscribed(
 ):
     author = db.query(models.User).get(author_id)
     if author is None:
-        raise HTTPException(status_code=400, detail='au')
+        raise HTTPException(status_code=400, detail='author does not exist')
     subscription = db.query(models.Subscriber).filter(
         models.Subscriber.author_id == author_id
     ).filter(models.Subscriber.user_id == user.get('id')).first()
@@ -93,3 +93,33 @@ async def get_subscribed(
         recipe_count=recipe_count
     )
     return user_instance
+
+
+@router.delete(
+    '/{author_id}/subscribe/', status_code=status.HTTP_204_NO_CONTENT
+)
+async def unsubscribe(    
+    author_id: int,
+    user: dict = Security(get_user),
+    db: Session = Depends(get_db)
+):
+    author = db.query(models.User).get(author_id)
+    if author is None:
+        raise HTTPException(status_code=400, detail='author does not exist')
+    subscription = db.query(models.Subscriber).filter(
+        models.Subscriber.author_id == author_id
+    ).filter(models.Subscriber.user_id == user.get('id')).first()
+    if subscription is None:
+        raise HTTPException(status_code=400, detail="you're not subscribed")
+    db.query(models.Subscriber).filter(
+        models.Subscriber.author_id == author_id
+    ).filter(models.Subscriber.user_id == user.get('id')).delete()
+    db.commit()
+    return 'deleted'
+
+
+# @router.get('/subscriptions/')
+# async def get_all_subscriptions(
+#     user: dict = Security(get_user),
+#     db: Session = Depends(get_db)
+# ):
