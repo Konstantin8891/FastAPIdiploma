@@ -23,3 +23,8 @@ cryptography==38.0.3
 cffi==1.15.1
 six==1.16.0
 pycparser==2.21
+fastapi_contrib==0.2.11
+pymongo==4.3.3
+dnspython==2.2.1
+pytz==2022.6
+motor==3.1.1

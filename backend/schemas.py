@@ -1,12 +1,35 @@
 from pydantic import BaseModel
 
 
-class Users(BaseModel):
+class CreateUser(BaseModel):
     email: str
     username: str
     first_name: str
     last_name: str
     password: str
+
+    class Config:
+        orm_mode = True
+
+
+class ViewCreatedUser(BaseModel):
+    email: str
+    id: int
+    username: str
+    first_name: str
+    last_name: str
+
+    class Config:
+        orm_mode = True
+
+
+class ViewUser(BaseModel):
+    email: str
+    id: int
+    username: str
+    first_name: str
+    last_name: str
+    is_subscribed: bool
 
     class Config:
         orm_mode = True
@@ -18,6 +41,14 @@ class CurrentUser(BaseModel):
     first_name: str
     last_name: str
     id: int
+
+    class Config:
+        orm_mode = True
+
+
+class SetPassword(BaseModel):
+    new_password: str
+    current_password: str
 
     class Config:
         orm_mode = True
@@ -78,13 +109,14 @@ class ViewIngredients(BaseModel):
 class ViewRecipes(BaseModel):
     id: int
     tags: list[ViewTags]
-    author: CurrentUser
+    author: ViewUser
     ingredients: list[ViewIngredients]
     name: str
     image: str
     text: str
     cooking_time: int
     is_favorited: bool
+    is_in_shopping_cart: bool
 
     class Config:
         orm_mode = True
