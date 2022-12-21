@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, status, Security, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi_pagination.ext.sqlalchemy import paginate
 from sqlalchemy import delete
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from .auth import get_db, get_user, get_user_or_none
 from routers.services.pagination import Page, Params
@@ -19,7 +19,7 @@ from routers.users import get_is_subscribed
 import sys
 sys.path.append('..')
 
-from schemas import PostRecipes, ViewRecipes, ShortRecipe, ViewUser
+from schemas import PostRecipes, ViewRecipes, ShortRecipe, ViewUser, ViewRecipes1
 
 import models
 
@@ -75,8 +75,9 @@ def get_image_url(str_image: str, name: str, request: Request):
         f'http://{request.client.host}:{request.url.port}/media/recipes/'
         f'images/{name}.{ext}'
     )
-
-
+    # return (
+    #     f'{request.url}images/{name}.{ext}'
+    # )
 
 
 @router.get('/download_shopping_cart/')
@@ -114,7 +115,7 @@ async def create_recipe(
     user: dict = Security(get_user),
     db: Session = Depends(get_db)
 ):
-    recipe_model = models.Recipe()
+    recipe_model = models.Recipe() #  источники данных
     recipe_model.text = recipe.text
     recipe.image = get_image_url(recipe.image, recipe.name, request)
     recipe_model.image = recipe.image
@@ -128,8 +129,8 @@ async def create_recipe(
     for tag in recipe.tags:
         tag_model = db.query(models.Tag).get(tag)
         recipe_model.tags.append(tag_model)
-    db.commit()
-    for ingredient in recipe.ingredients:
+    db.commit() # конец
+    for ingredient in recipe.ingredients: 
         ingredient_amount = models.IngredientAmount()
         ingredient_amount.ingredient_id = ingredient.id
         ingredient_amount.recipe_id = recipe_model.id
@@ -140,7 +141,7 @@ async def create_recipe(
         recipe_model.ingredients.append(ingredient_amount)
         db.commit()
     author_instance = db.query(models.User).get(user.get('id'))
-    is_subscribed = get_is_subscribed(user, db)
+    is_subscribed = get_is_subscribed(user, db) # бизнес-логика + репо
     author = ViewUser(
         email=author_instance.email,
         id=author_instance.id,
@@ -148,7 +149,7 @@ async def create_recipe(
         first_name=author_instance.first_name,
         last_name=author_instance.last_name,
         is_subscribed=is_subscribed
-    )
+    ) # entity + dto + бизнес-логика
     ingredient_amount = build_ingredients(recipe_model.ingredients, db, recipe_model)
     recipe_view_instance = ViewRecipes(
         id=recipe_model.id,
@@ -166,17 +167,28 @@ async def create_recipe(
 
 
 @router.get(
-    '/', response_model=Page[ViewRecipes], dependencies=[Depends(Params)]
-    # '/', response_model=list[ViewRecipes]
+    '/', response_model=Page[ViewRecipes1], dependencies=[Depends(Params)]
+    # '/', response_model=ViewRecipes1
+    # '/'
 )
 async def get_all_recipes(db: Session = Depends(get_db)):
+    # return paginate(
+    #     db.query(models.Recipe).order_by(models.Recipe.id).join(
+    #         models.Recipe.tags
+    #     ).join(models.Recipe.ingredients).join(
+    #         models.IngredientAmount.ingredient
+    #     )
+    # )
     return paginate(
-        db.query(models.Recipe).order_by(models.Recipe.id).join(
-            models.Recipe.tags
-        ).join(models.Recipe.ingredients).join(
-            models.IngredientAmount.ingredient
+        db.query(models.Recipe).order_by(models.Recipe.id).options(
+            selectinload(models.Recipe.tags)
+        ).options(
+            selectinload(models.Recipe.ingredients).options(selectinload(
+                models.IngredientAmount.ingredient
+            ))
         )
     )
+
 
 
 @router.get('/{recipe_id}/', response_model=ViewRecipes)

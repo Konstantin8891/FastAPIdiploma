@@ -1,12 +1,17 @@
-from fastapi import APIRouter, status, Depends, HTTPException, Security
+from typing import Optional
+
+from fastapi import APIRouter, status, Depends, HTTPException, Security, Request
 # from fastapi.security import OAuth2PasswordBearer
 from fastapi_contrib.pagination import Pagination
 from fastapi_pagination import add_pagination
 from fastapi_pagination.ext.sqlalchemy import paginate
 from sqlalchemy.orm import Session
+# from fastapi_pagination import (
+#     CURSOR_QUERY, PAGE_SIZE_QUERY, PaginationDetails, PaginatedResults
+# )
 
 from routers.auth import get_user, get_db
-from routers.services.pagination import Page
+from routers.services.pagination import Page, Params
 from routers.services.password import get_password_hash, verify_password
 
 import sys
@@ -22,7 +27,8 @@ from schemas import (
     SubscribeUser,
     ViewCreatedUser,
     ViewUser,
-    SetPassword
+    SetPassword,
+    ViewUser1
 )
 
 
@@ -57,17 +63,14 @@ async def create_user(user: CreateUser, db: Session = Depends(get_db)):
     return user_model
 
 
-@router.get('/', response_model=Page[ViewUser])
-async def get_all_users(db: Session = Depends(get_db)):
-    return paginate(db.query(models.User).order_by(models.User.id))
+@router.get('/', response_model=Page[ViewUser1], dependencies=[Depends(Params)])
 # @router.get('/')
-# async def get_all_users(
-#     db: Session = Depends(get_db), pagination: Pagination = Depends()
-# ):
-#     return await pagination.paginate(
-#         serializer_class=UserSerializer(count=db.query(models.User).count())
-#         # db.query(models.User).order_by(models.User.id)
-#     )
+# @router.get('/')
+# @router.get('/', response_model=PaginatedResults[ViewUser])
+async def get_all_users(db: Session = Depends(get_db)):
+    res = paginate(db.query(models.User).order_by(models.User.id))
+    return res
+    # return 'something'
 
 
 @router.get('/me/', response_model=ViewUser)
@@ -75,14 +78,6 @@ async def get_current_user(
     user: dict = Security(get_user), db: Session = Depends(get_db)
 ):
     user_model = db.query(models.User).get(user.get('id'))
-
-    # subscriber = db.query(models.Subscriber).filter(
-    #     models.Subscriber.author_id == user.get('id')
-    # ).filter(models.Subscriber.user_id == user.get('id')).first()
-    # if subscriber is None:
-    #     is_subscribed = False
-    # else:
-    #     is_subscribed = True
     is_subscribed = get_is_subscribed(user, db)
     return ViewUser(
         email=user_model.email,
@@ -103,13 +98,6 @@ async def get_user_by_id(
     user_model = db.query(models.User).filter(models.User.id == user_id).first()
     if user_model is None:
         raise HTTPException(status_code=400, detail='User does not exist')
-    # subscriber = db.query(models.Subscriber).filter(
-    #     models.Subscriber.author_id == user_id
-    # ).filter(models.Subscriber.user_id == user.get('id')).first()
-    # if subscriber is None:
-    #     is_subscribed = False
-    # else:
-    #     is_subscribed = True
     is_subscribed = get_is_subscribed(user, db)
     return ViewUser(
         email=user_model.email,

@@ -7,8 +7,8 @@ from routers import users, tags, ingredients, recipes, auth
 
 
 def configure_media(app): 
+    # app.mount("/api/recipes/images", StaticFiles(directory="media"), name="media")
     app.mount("/media", StaticFiles(directory="media"), name="media")
-
 
 def start_application():
     app = FastAPI()
