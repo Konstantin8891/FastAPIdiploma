@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from fastapi.security import OAuth2AuthorizationCodeBearer, SecurityScopes
 
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Security, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2AuthorizationCodeBearer
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
@@ -76,3 +76,13 @@ async def get_token(credentials: CreateToken, db: Session = Depends(get_db)):
     expire = datetime.utcnow() + timedelta(minutes=60)
     encode.update({"exp": expire})
     return {"auth_token": jwt.encode(encode, SECRET_KEY, algorithm=ALGORITHM)}
+
+
+# @router.post('/token/logout/', status_code=status.HTTP_204_NO_CONTENT)
+# async def delete_token(user: dict = Security(get_user), db: Session = Depends(get_db)):
+#     user = db.query(models.User).get(user.get('id'))
+#     encode = {"sub": user.email, "id": user.id}
+#     expire = datetime.utcnow()
+#     encode.update({"exp": expire})
+#     jwt.encode(encode, SECRET_KEY, algorithm=ALGORITHM)
+#     return 'deleted'

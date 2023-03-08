@@ -130,3 +130,22 @@ dmypy.json
 
 .idea/
 
+_users.py
+
+pagination.py
+
+_recipes.py
+
+makefile.jpg
+
+pagination1.png
+pagination2.png
+pagination3.png
+
+_models.py
+
+static/
+
+admin_picollo/
+
+piccolo_conf.py

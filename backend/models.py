@@ -1,9 +1,19 @@
-from sqlalchemy import Integer, String, Boolean, ForeignKey, Column, DateTime
-from sqlalchemy.schema import Table
-from sqlalchemy.orm import relationship
+import logging
 
-from database import Base
+from sqlalchemy import (
+    Integer, String, Boolean, ForeignKey, Column, DateTime, func, Unicode
+)
+from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy.schema import Table
+from sqlalchemy.orm import relationship, scoped_session, sessionmaker
+
+from database import Base, SessionLocal, engine
 from proxy_model import URLType
+
+
+current_session = scoped_session(sessionmaker(
+    autocommit=False, autoflush=False, bind=engine
+))
 
 
 class User(Base):
@@ -19,13 +29,16 @@ class User(Base):
     favorites = relationship('Favorite', back_populates='user_f')
     shoppingcart_u = relationship('ShoppingCart', back_populates='user_sc')
 
+    def __str__(self):
+        return self.username
 
-IngredientRecipeRelation = Table(
-    'ingredient_recipe_relation',
-    Base.metadata,
-    Column('ingredient_id', Integer, ForeignKey('ingredient_amount.id')),
-    Column('recipe_id', Integer, ForeignKey('recipe.id'))
-)
+
+# IngredientRecipeRelation = Table(
+#     'ingredient_recipe_relation',
+#     Base.metadata,
+#     Column('ingredient_id', Integer, ForeignKey('ingredient_amount.id')),
+#     Column('recipe_id', Integer, ForeignKey('recipe.id'))
+# )
 
 TagRecipeRelation = Table(
     'tag_recipe_relation',
@@ -48,6 +61,9 @@ class Tag(Base):
         cascade='all, delete'
     )
 
+    def __str__(self):
+        return self.name
+
 
 class Ingredient(Base):
     __tablename__ = 'ingredient'
@@ -57,10 +73,13 @@ class Ingredient(Base):
 
     ingredient_amount = relationship('IngredientAmount', back_populates='ingredient')
 
+    def __str__(self):
+        return self.name
+
 
 class IngredientAmount(Base):
     __tablename__ = 'ingredient_amount'
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, nullable=True)
     ingredient_id = Column(Integer, ForeignKey('ingredient.id'))
     recipe_id = Column(Integer, ForeignKey('recipe.id'))
     amount = Column(Integer)
@@ -69,10 +88,27 @@ class IngredientAmount(Base):
 
     recipes = relationship(
         'Recipe',
-        secondary=IngredientRecipeRelation,
         back_populates='ingredients',
         cascade='all, delete'
     )
+
+    def __str__(self):
+        ingredient = current_session.query(Ingredient).get(self.ingredient_id)
+        return f'{ingredient} {self.amount}'
+
+
+class Image(Base):
+    __tablename__ = 'image'
+    id = Column(Integer, primary_key=True)
+    name = Column(Unicode(64))
+    path = Column(Unicode(128))
+    url = Column(URLType)
+
+    recipe = relationship('Recipe', back_populates='image')
+
+    def __unicode__(self):
+        return self.url
+
 
 
 class Recipe(Base):
@@ -80,13 +116,12 @@ class Recipe(Base):
     id = Column(Integer, primary_key=True, index=True)
     text = Column(String)
     cooking_time = Column(Integer)
-    image = Column(URLType)
+    image_id = Column(Integer, ForeignKey('image.id'), nullable=True)
     created = Column(DateTime)
     name = Column(String, unique=True)
     author_id = Column(Integer, ForeignKey('user.id'))
     ingredients = relationship(
         'IngredientAmount',
-        secondary=IngredientRecipeRelation,
         back_populates='recipes',
         cascade='all, delete'
     )
@@ -98,8 +133,17 @@ class Recipe(Base):
     )
 
     author = relationship('User', back_populates='recipeuser')
+    image = relationship('Image', back_populates='recipe')
     favorites_r = relationship('Favorite', back_populates='recipe_f')
     shoppingcart_r = relationship('ShoppingCart', back_populates='recipe_sc')
+
+    @hybrid_property
+    def favorites(self):
+        query = current_session.query(Favorite).filter(Favorite.recipe_id == self.id)
+        query = query.with_entities(func.count())
+        query = query.scalar()
+        return query
+        
 
 
 class Favorite(Base):

@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -112,39 +114,11 @@ class ViewRecipes(BaseModel):
     author: ViewUser
     ingredients: list[ViewIngredients]
     name: str
-    image: str
+    image: Optional[str]
     text: str
     cooking_time: int
     is_favorited: bool
     is_in_shopping_cart: bool
-
-    class Config:
-        orm_mode = True
-
-
-class ViewUser1(BaseModel):
-    email: str
-    id: int
-    username: str
-    first_name: str
-    last_name: str
-    # is_subscribed: bool
-
-    class Config:
-        orm_mode = True
-
-
-class ViewRecipes1(BaseModel):
-    id: int
-    tags: list[ViewTags]
-    author: ViewUser1
-    ingredients: list[ViewIngredients]
-    name: str
-    image: str
-    text: str
-    cooking_time: int
-    # is_favorited: bool
-    # is_in_shopping_cart: bool
 
     class Config:
         orm_mode = True

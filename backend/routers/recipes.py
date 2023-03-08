@@ -2,15 +2,16 @@ import base64
 import io
 import json
 import shutil
+import logging
 
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List, Union
 
-from fastapi import APIRouter, Depends, status, Security, HTTPException, Request
+from fastapi import APIRouter, Depends, status, Security, HTTPException, Request, Query
 from fastapi.responses import FileResponse
 from fastapi_pagination.ext.sqlalchemy import paginate
 from sqlalchemy import delete
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, selectinload, load_only
 
 from .auth import get_db, get_user, get_user_or_none
 from routers.services.pagination import Page, Params
@@ -19,7 +20,7 @@ from routers.users import get_is_subscribed
 import sys
 sys.path.append('..')
 
-from schemas import PostRecipes, ViewRecipes, ShortRecipe, ViewUser, ViewRecipes1
+from schemas import PostRecipes, ViewRecipes, ShortRecipe, ViewUser
 
 import models
 
@@ -75,9 +76,6 @@ def get_image_url(str_image: str, name: str, request: Request):
         f'http://{request.client.host}:{request.url.port}/media/recipes/'
         f'images/{name}.{ext}'
     )
-    # return (
-    #     f'{request.url}images/{name}.{ext}'
-    # )
 
 
 @router.get('/download_shopping_cart/')
@@ -117,8 +115,19 @@ async def create_recipe(
 ):
     recipe_model = models.Recipe() #  источники данных
     recipe_model.text = recipe.text
-    recipe.image = get_image_url(recipe.image, recipe.name, request)
-    recipe_model.image = recipe.image
+    if recipe.image:
+        image = models.Image(
+            name=recipe.name,
+            path=recipe.name.lower() + 'jpg',
+            url=get_image_url(recipe.image, recipe.name, request)
+        )
+        image.add(image)
+        image.commit()
+        image.refresh(image)
+        recipe.image_id = image.id
+    # recipe.image_id = get_image_url(recipe.image, recipe.name, request)
+
+    # recipe_model.image = recipe.image
     recipe_model.name = recipe.name
     recipe_model.cooking_time = recipe.cooking_time
     recipe_model.created = datetime.now()
@@ -157,7 +166,7 @@ async def create_recipe(
         ingredients=ingredient_amount,
         author=author,
         name=recipe.name,
-        image=recipe.image,
+        image=image.url,
         text=recipe.text,
         cooking_time=recipe.cooking_time,
         is_favorited=False,
@@ -166,28 +175,123 @@ async def create_recipe(
     return recipe_view_instance
 
 
-@router.get(
-    '/', response_model=Page[ViewRecipes1], dependencies=[Depends(Params)]
-    # '/', response_model=ViewRecipes1
-    # '/'
-)
-async def get_all_recipes(db: Session = Depends(get_db)):
-    # return paginate(
-    #     db.query(models.Recipe).order_by(models.Recipe.id).join(
-    #         models.Recipe.tags
-    #     ).join(models.Recipe.ingredients).join(
-    #         models.IngredientAmount.ingredient
-    #     )
-    # )
-    return paginate(
-        db.query(models.Recipe).order_by(models.Recipe.id).options(
-            selectinload(models.Recipe.tags)
-        ).options(
-            selectinload(models.Recipe.ingredients).options(selectinload(
-                models.IngredientAmount.ingredient
-            ))
+@router.get('/')
+async def get_all_recipes(
+    page: int,
+    limit: int,
+    request: Request,
+    is_favorited: Optional[int] = None,
+    is_in_shopping_cart: Optional[int] = None,
+    author: Optional[int] = None,
+    tags: Optional[List[str]] = Query(None),
+    user: dict = Security(get_user_or_none),
+    db: Session = Depends(get_db)
+):
+    recipes = db.query(models.Recipe).order_by(models.Recipe.id)
+    if author:
+        recipes = recipes.filter(models.Recipe.author_id == author)
+    if user is not None:
+        if is_favorited == 1:
+            favorites = db.query(models.Favorite).filter(
+                models.Favorite.user_id == user.get('id')
+            )
+            fav_list = [0] * favorites.count()
+            counter = 0
+            for favorite in favorites:
+                fav_list[counter] = favorite.recipe_id
+                counter += 1
+            recipes = recipes.filter(models.Recipe.id.in_(fav_list))
+        if is_in_shopping_cart == 1:
+            shopping_cart = db.query(models.ShoppingCart).filter(
+                models.ShoppingCart.user_id == user.get('id')
+            )
+            shop_list = [0] * shopping_cart.count()
+            counter = 0
+            for recipe in shopping_cart:
+                shop_list[counter] = recipe.recipe_id
+                counter += 1
+            recipes = recipes.filter(models.Recipe.id.in_(shop_list))
+    
+    if tags:
+        tags_arr = db.query(models.Tag).filter(models.Tag.slug.in_(tags)).all()
+        recipe_arr = [0] * len(tags_arr)
+        for i in range(len(tags_arr)):
+            recipe_arr[i] = recipes.filter(models.Recipe.tags.contains(tags_arr[i]))
+        if recipe_arr[0]:    
+            recipes = recipe_arr[0]
+        else: 
+            recipes = Query(None)
+        for i in range(1,len(recipe_arr)):
+            recipes = recipes.union_all(recipe_arr[i])
+
+
+    count = recipes.count()
+    if (count % limit != 0 and count // limit + 1 < page) or (
+        count % limit == 0 and count / limit < page
+    ):
+        raise HTTPException(status_code=400, detail='Page does not exist')
+    if (count % limit != 0 and count // limit + 1 == page) or (
+        count % limit == 0 and count / limit == page
+    ):
+        next = None
+    else:
+        next = f'http://{request.client.host}:{request.url.port}/?page={page + 1}'
+    if page == 1:
+        prev = None
+    else:
+        prev = f'http://{request.client.host}:{request.url.port}/?page={page - 1}'
+    result = {}
+    result['count'] = count
+    result['next'] = next
+    result['previous'] = prev
+    recipes = recipes.all()[((page - 1) * limit):(page * limit)]
+    result['results'] = [0] * len(recipes)
+    counter = 0
+    for recipe in recipes:
+        author_instance = db.query(models.User).get(recipe.author_id)
+        image_instance = db.query(models.Image).get(recipe.image_id)
+        if image_instance:
+            image_url = image_instance.url
+        else:
+            image_url = None
+        ingredient_amount = build_ingredients(
+            recipe.ingredients, db, recipe
         )
-    )
+        if user is None:
+            is_favorited = False
+        else:
+            is_favorited = get_favorites(recipe.id, user, db)
+        if user is None:
+            is_in_shopping_cart = False
+        else:
+            is_in_shopping_cart = build_shopping_cart(user, recipe.id, db)
+        if user is None:
+            is_subscribed = False
+        else:
+            is_subscribed = get_is_subscribed(user, db)
+        author = ViewUser(
+            email=author_instance.email,
+            id=author_instance.id,
+            username=author_instance.username,
+            first_name=author_instance.first_name,
+            last_name=author_instance.last_name,
+            is_subscribed=is_subscribed
+        )
+        recipe_instance = ViewRecipes(
+            id=recipe.id,
+            tags=recipe.tags,
+            author=author,
+            ingredients=ingredient_amount,
+            name=recipe.name,
+            image=image_url,
+            text=recipe.text,
+            cooking_time=recipe.cooking_time,
+            is_favorited=is_favorited,
+            is_in_shopping_cart=is_in_shopping_cart
+        )
+        result['results'][counter] = recipe_instance
+        counter += 1
+    return result
 
 
 
@@ -216,8 +320,10 @@ async def get_recipe_by_id(
         is_in_shopping_cart = False
     else:
         is_in_shopping_cart = build_shopping_cart(user, recipe_id, db)
-    print(is_in_shopping_cart)
-    is_subscribed = get_is_subscribed(user, db)
+    if user is None:
+        is_subscribed = False
+    else:
+        is_subscribed = get_is_subscribed(user, db)
     author = ViewUser(
         email=author_instance.email,
         id=author_instance.id,
@@ -419,6 +525,3 @@ async def delete_from_shopping_cart(
     ).filter(models.ShoppingCart.recipe_id == recipe.id).delete()
     db.commit()
     return 'deleted'
-
-
-

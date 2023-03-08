@@ -1,16 +1,10 @@
 from typing import Optional
 
 from fastapi import APIRouter, status, Depends, HTTPException, Security, Request
-# from fastapi.security import OAuth2PasswordBearer
-from fastapi_contrib.pagination import Pagination
 from fastapi_pagination import add_pagination
-from fastapi_pagination.ext.sqlalchemy import paginate
 from sqlalchemy.orm import Session
-# from fastapi_pagination import (
-#     CURSOR_QUERY, PAGE_SIZE_QUERY, PaginationDetails, PaginatedResults
-# )
 
-from routers.auth import get_user, get_db
+from routers.auth import get_user, get_db, get_user_or_none
 from routers.services.pagination import Page, Params
 from routers.services.password import get_password_hash, verify_password
 
@@ -20,7 +14,6 @@ sys.path.append('..')
 import models
 from serializers import UserSerializer
 
-# from database import SessionLocal
 from schemas import (
     CreateUser,
     CurrentUser,
@@ -28,7 +21,7 @@ from schemas import (
     ViewCreatedUser,
     ViewUser,
     SetPassword,
-    ViewUser1
+    ShortRecipe
 )
 
 
@@ -63,14 +56,56 @@ async def create_user(user: CreateUser, db: Session = Depends(get_db)):
     return user_model
 
 
-@router.get('/', response_model=Page[ViewUser1], dependencies=[Depends(Params)])
-# @router.get('/')
-# @router.get('/')
-# @router.get('/', response_model=PaginatedResults[ViewUser])
-async def get_all_users(db: Session = Depends(get_db)):
-    res = paginate(db.query(models.User).order_by(models.User.id))
-    return res
-    # return 'something'
+@router.get('/')
+async def get_all_users(
+    page: int,
+    limit: int,
+    request: Request,
+    user: Optional[dict] = Security(get_user_or_none),
+    db: Session = Depends(get_db)
+):
+    users = db.query(models.User).order_by(models.User.id).all()[
+        ((page - 1) * limit):(page * limit)
+    ]
+    count = db.query(models.User).count()
+    if (count % limit != 0 and count // limit + 1 < page) or (
+        count % limit == 0 and count / limit < page
+    ):
+        raise HTTPException(status_code=400, detail='Page does not exist')
+    if (count % limit != 0 and count // limit + 1 == page) or (
+        count % limit == 0 and count / limit == page
+    ):
+        next = None
+    else:
+        next = f'http://{request.client.host}:{request.url.port}/?page={page + 1}'
+    if page == 1:
+        prev = None
+    else:
+        prev = f'http://{request.client.host}:{request.url.port}/?page={page - 1}'
+    result = {}
+    result['count'] = count
+    result['next'] = next
+    result['previous'] = prev
+    result['results'] = []
+    for user_instance in users:
+        sub_res = {}
+        sub_res['email'] = user_instance.email
+        sub_res['id'] = user_instance.id
+        sub_res['username'] = user_instance.username
+        sub_res['first_name'] = user_instance.first_name
+        sub_res['last_name'] = user_instance.last_name
+        if user is None:
+            sub_res['is_subscribed'] = False
+        else:
+            subscription = db.query(models.Subscriber).filter(
+                models.Subscriber.user_id == user.get('id')
+            ).filter(models.Subscriber.author_id == user_instance.id).first()
+            if subscription is None:
+                sub_res['is_subscribed'] = False
+            else:
+                sub_res['is_subscribed'] = True
+        result['results'].append(sub_res)
+    return result
 
 
 @router.get('/me/', response_model=ViewUser)
@@ -87,6 +122,67 @@ async def get_current_user(
         last_name=user_model.last_name,
         is_subscribed=is_subscribed
     )
+
+
+@router.get('/subscriptions/')
+async def get_all_subscriptions(
+    page: int,
+    limit: int,
+    request: Request,
+    recipe_limit: Optional[int] = None,
+    user: dict = Security(get_user),
+    db: Session = Depends(get_db)
+):
+    authors = db.query(models.Subscriber).filter(
+        models.Subscriber.user_id == user.get('id')
+    ).order_by(models.Subscriber.id).all()[
+        ((page - 1) * limit):(page * limit)
+    ]
+    count = db.query(models.Subscriber).filter(models.Subscriber.user_id == user.get('id')).count()
+    if (count % limit != 0 and count // limit + 1 < page) or (
+        count % limit == 0 and count / limit < page
+    ):
+        raise HTTPException(status_code=400, detail='Page does not exist')
+    if (count % limit != 0 and count // limit + 1 == page) or (
+        count % limit == 0 and count / limit == page
+    ):
+        next = None
+    else:
+        next = f'http://{request.client.host}:{request.url.port}/?page={page + 1}'
+    if page == 1:
+        prev = None
+    else:
+        prev = f'http://{request.client.host}:{request.url.port}/?page={page - 1}'
+    result = {}
+    result['count'] = count
+    result['next'] = next
+    result['previous'] = prev
+    result['results'] = []
+    for author in authors:
+        user_instance = db.query(models.User).get(author.author_id)
+        sub_res = {}
+        sub_res['email'] = user_instance.email
+        sub_res['id'] = user_instance.id
+        sub_res['username'] = user_instance.username
+        sub_res['first_name'] = user_instance.first_name
+        sub_res['last_name'] = user_instance.last_name
+        sub_res['is_subscribed'] = True
+        recipes = db.query(models.Recipe).filter(
+            models.Recipe.author_id == author.author_id
+        )
+        if recipe_limit:
+            recipes = recipes[:recipe_limit]
+        sub_res['recipes'] = []
+        for recipe in recipes:
+            recipe_instance = ShortRecipe(
+                id=recipe.id,
+                name=recipe.name,
+                image=recipe.image,
+                cooking_time=recipe.cooking_time
+            )
+            sub_res['recipes'].append(recipe_instance)
+        result['results'].append(sub_res)
+    return result
 
 
 @router.get('/{user_id}/', response_model=ViewUser)
@@ -125,7 +221,7 @@ async def set_new_password(
 @router.post('/{author_id}/subscribe/', response_model=SubscribeUser)
 async def get_subscribed(
     author_id: int,
-    recipe_limit: int,
+    recipe_limit: Optional[int] = None,
     user: dict = Security(get_user),
     db: Session = Depends(get_db)
 ):
@@ -142,12 +238,19 @@ async def get_subscribed(
     subscribe.user_id = user.get('id')
     db.add(subscribe)
     db.commit()
-    recipes = db.query(models.Recipe).filter(
-        models.Recipe.author_id == author_id
-    )[:recipe_limit]
+    if recipe_limit:
+        recipes = db.query(models.Recipe).filter(
+            models.Recipe.author_id == author_id
+        )[:recipe_limit]
+    else:
+        recipes = db.query(models.Recipe).filter(
+            models.Recipe.author_id == author_id
+        )
+    print(recipes)
     recipe_count = db.query(models.Recipe).filter(
         models.Recipe.author_id == author_id
     ).count()
+    recipes = recipes.all()
     user_instance = SubscribeUser(
         email=author.email,
         id=author_id,
@@ -182,10 +285,3 @@ async def unsubscribe(
     ).filter(models.Subscriber.user_id == user.get('id')).delete()
     db.commit()
     return 'deleted'
-
-
-# @router.get('/subscriptions/')
-# async def get_all_subscriptions(
-#     user: dict = Security(get_user),
-#     db: Session = Depends(get_db)
-# ):
