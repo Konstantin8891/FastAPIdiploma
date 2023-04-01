@@ -3,27 +3,32 @@ import logging
 from sqlalchemy import (
     Integer, String, Boolean, ForeignKey, Column, DateTime, func, Unicode
 )
+from sqlalchemy_utils.types.url import URLType
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.schema import Table
 from sqlalchemy.orm import relationship, scoped_session, sessionmaker
+from sqlalchemy_utils import EmailType, ChoiceType
 
 from database import Base, SessionLocal, engine
-from proxy_model import URLType
+# from proxy_model import URLType
 
 
 current_session = scoped_session(sessionmaker(
     autocommit=False, autoflush=False, bind=engine
 ))
 
+ROLES = (('admin', 'admin'), ('user', 'user'))
+
 
 class User(Base):
-    __tablename__ = 'user'
+    __tablename__ = 'users'
     id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True)
+    email = Column(EmailType, unique=True)
     username = Column(String, unique=True)
     first_name = Column(String)
     last_name = Column(String)
     password = Column(String)
+    role = Column(ChoiceType(ROLES))
 
     recipeuser = relationship('Recipe', back_populates='author')
     favorites = relationship('Favorite', back_populates='user_f')
@@ -31,6 +36,9 @@ class User(Base):
 
     def __str__(self):
         return self.username
+
+    def is_admin(self):
+        return self.role == 'admin'
 
 
 # IngredientRecipeRelation = Table(
@@ -106,9 +114,11 @@ class Image(Base):
 
     recipe = relationship('Recipe', back_populates='image')
 
-    def __unicode__(self):
-        return self.url
+    # def __unicode__(self):
+    #     return self.url
 
+    def __str__(self):
+        return self.url
 
 
 class Recipe(Base):
@@ -119,7 +129,7 @@ class Recipe(Base):
     image_id = Column(Integer, ForeignKey('image.id'), nullable=True)
     created = Column(DateTime)
     name = Column(String, unique=True)
-    author_id = Column(Integer, ForeignKey('user.id'))
+    author_id = Column(Integer, ForeignKey('users.id'))
     ingredients = relationship(
         'IngredientAmount',
         back_populates='recipes',
@@ -149,7 +159,7 @@ class Recipe(Base):
 class Favorite(Base):
     __tablename__ = 'favorite'
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey('user.id'))
+    user_id = Column(Integer, ForeignKey('users.id'))
     recipe_id = Column(Integer, ForeignKey('recipe.id'))
 
     user_f = relationship('User', back_populates='favorites')
@@ -159,7 +169,7 @@ class Favorite(Base):
 class ShoppingCart(Base):
     __tablename__ = 'shopping_cart'
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey('user.id'))
+    user_id = Column(Integer, ForeignKey('users.id'))
     recipe_id = Column(Integer, ForeignKey('recipe.id'))
 
     user_sc = relationship('User', back_populates='shoppingcart_u')
@@ -169,5 +179,5 @@ class ShoppingCart(Base):
 class Subscriber(Base):
     __tablename__ = 'subscriber'
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey('user.id'))
-    author_id = Column(Integer, ForeignKey('user.id'))
+    user_id = Column(Integer, ForeignKey('users.id'))
+    author_id = Column(Integer, ForeignKey('users.id'))

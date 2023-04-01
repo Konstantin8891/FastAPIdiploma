@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+import os
 import shutil
 import logging
 
@@ -65,17 +66,21 @@ def build_shopping_cart(user: dict, recipe_id: int, db: Session):
         return True
 
 
-def get_image_url(str_image: str, name: str, request: Request):
+def save_image(str_image: str, name: str):
     format, imgstr = str_image.split(';base64,')
     ext = format.split('/')[-1]
     data = base64.b64decode(imgstr)
     file_location = f'media/recipes/images/{name}.{ext}'
     with open(file_location, 'wb+') as image:
         image.write(data)
-    return (
-        f'http://{request.client.host}:{request.url.port}/media/recipes/'
-        f'images/{name}.{ext}'
-    )
+    return ext
+
+
+def get_image_url(image_id: int, db: Session):
+    image_instance = db.query(models.Image).get(image_id)
+    if image_instance:
+        return image_instance.url
+    return None
 
 
 @router.get('/download_shopping_cart/')
@@ -116,22 +121,23 @@ async def create_recipe(
     recipe_model = models.Recipe() #  источники данных
     recipe_model.text = recipe.text
     if recipe.image:
+        ext = save_image(recipe.image, recipe.name)
         image = models.Image(
             name=recipe.name,
             path=recipe.name.lower() + 'jpg',
-            url=get_image_url(recipe.image, recipe.name, request)
+            url=f'http://{request.client.host}:{request.url.port}/media/'
+                f'recipes/images/{recipe.name}.{ext}'
         )
-        image.add(image)
-        image.commit()
-        image.refresh(image)
-        recipe.image_id = image.id
-    # recipe.image_id = get_image_url(recipe.image, recipe.name, request)
+        db.add(image)
+        db.commit()
+        db.refresh(image)
 
-    # recipe_model.image = recipe.image
     recipe_model.name = recipe.name
     recipe_model.cooking_time = recipe.cooking_time
     recipe_model.created = datetime.now()
     recipe_model.author_id = user.get('id')
+    if recipe.image:
+        recipe_model.image_id = image.id
     db.add(recipe_model)
     db.commit()
     db.refresh(recipe_model)
@@ -160,18 +166,31 @@ async def create_recipe(
         is_subscribed=is_subscribed
     ) # entity + dto + бизнес-логика
     ingredient_amount = build_ingredients(recipe_model.ingredients, db, recipe_model)
-    recipe_view_instance = ViewRecipes(
-        id=recipe_model.id,
-        tags=recipe_model.tags,
-        ingredients=ingredient_amount,
-        author=author,
-        name=recipe.name,
-        image=image.url,
-        text=recipe.text,
-        cooking_time=recipe.cooking_time,
-        is_favorited=False,
-        is_in_shopping_cart=False
-    )
+    if recipe.image:
+        recipe_view_instance = ViewRecipes(
+            id=recipe_model.id,
+            tags=recipe_model.tags,
+            ingredients=ingredient_amount,
+            author=author,
+            name=recipe.name,
+            image=image.url,
+            text=recipe.text,
+            cooking_time=recipe.cooking_time,
+            is_favorited=False,
+            is_in_shopping_cart=False
+        )
+    else:
+        recipe_view_instance = ViewRecipes(
+            id=recipe_model.id,
+            tags=recipe_model.tags,
+            ingredients=ingredient_amount,
+            author=author,
+            name=recipe.name,
+            text=recipe.text,
+            cooking_time=recipe.cooking_time,
+            is_favorited=False,
+            is_in_shopping_cart=False
+        )
     return recipe_view_instance
 
 
@@ -187,6 +206,7 @@ async def get_all_recipes(
     user: dict = Security(get_user_or_none),
     db: Session = Depends(get_db)
 ):
+    # rememeber page and limit
     recipes = db.query(models.Recipe).order_by(models.Recipe.id)
     if author:
         recipes = recipes.filter(models.Recipe.author_id == author)
@@ -219,11 +239,10 @@ async def get_all_recipes(
             recipe_arr[i] = recipes.filter(models.Recipe.tags.contains(tags_arr[i]))
         if recipe_arr[0]:    
             recipes = recipe_arr[0]
+            for i in range(1,len(recipe_arr)):
+                recipes = recipes.union_all(recipe_arr[i])
         else: 
             recipes = Query(None)
-        for i in range(1,len(recipe_arr)):
-            recipes = recipes.union_all(recipe_arr[i])
-
 
     count = recipes.count()
     if (count % limit != 0 and count // limit + 1 < page) or (
@@ -249,11 +268,7 @@ async def get_all_recipes(
     counter = 0
     for recipe in recipes:
         author_instance = db.query(models.User).get(recipe.author_id)
-        image_instance = db.query(models.Image).get(recipe.image_id)
-        if image_instance:
-            image_url = image_instance.url
-        else:
-            image_url = None
+        image_url = get_image_url(recipe.image_id, db)
         ingredient_amount = build_ingredients(
             recipe.ingredients, db, recipe
         )
@@ -302,6 +317,7 @@ async def get_recipe_by_id(
     user: dict = Security(get_user_or_none)
 ):
     recipe_instance = db.query(models.Recipe).get(recipe_id)
+    image_url = get_image_url(recipe_instance.image_id, db)
     if recipe_instance is None:
         raise HTTPException(status_code=400, detail='recipe not found')
     author_instance = db.query(models.User).get(recipe_instance.author_id)
@@ -338,7 +354,7 @@ async def get_recipe_by_id(
         author=author,
         ingredients=ingredient_amount,
         name=recipe_instance.name,
-        image=recipe_instance.image,
+        image=image_url,
         text=recipe_instance.text,
         cooking_time=recipe_instance.cooking_time,
         is_favorited=is_favorited,
@@ -360,7 +376,26 @@ async def patch_recipe(
         raise HTTPException(
             status_code=403, detail='You have no rights to edit this recipe'
         )
-    recipe_instance.image = get_image_url(recipe.image, recipe.name, request)
+    if recipe_instance.image:
+        try:
+            image = db.query(models.Image).filter(models.Image == recipe.name).first()
+            if image:
+                path = image.path
+                _, ext = path.split('.')
+                os.remove(os.path(f'media/recipes/images/{recipe.name}.{ext}'))
+        except OSError:
+            pass
+        ext = save_image(recipe.image, recipe.name)
+        image = models.Image(
+            name=recipe.name,
+            path=recipe.name.lower() + 'jpg',
+            url=f'http://{request.client.host}:{request.url.port}/media/'
+                f'recipes/images/{recipe.name}.{ext}'
+        )
+        db.add(image)
+        db.commit()
+        db.refresh(image)
+        recipe_instance.image_id = image.id
     recipe_instance.name = recipe.name
     recipe_instance.text = recipe.text
     recipe_instance.cooking_time = recipe.cooking_time
@@ -396,18 +431,31 @@ async def patch_recipe(
         is_subscribed=is_subscribed
     )
     is_in_shopping_cart = build_shopping_cart(user, recipe_id, db)
-    recipe = ViewRecipes(
-        id=recipe_id,
-        tags=recipe_instance.tags,
-        ingredients=ingredient_amount,
-        author=author,
-        name=recipe_instance.name,
-        image=recipe_instance.image,
-        text=recipe_instance.text,
-        cooking_time=recipe_instance.cooking_time,
-        is_favorited=is_favorited,
-        is_in_shopping_cart=is_in_shopping_cart
-    )
+    if recipe_instance.image:
+        recipe = ViewRecipes(
+            id=recipe_id,
+            tags=recipe_instance.tags,
+            ingredients=ingredient_amount,
+            author=author,
+            name=recipe_instance.name,
+            image=image.url,
+            text=recipe_instance.text,
+            cooking_time=recipe_instance.cooking_time,
+            is_favorited=is_favorited,
+            is_in_shopping_cart=is_in_shopping_cart
+        )
+    else:
+        recipe = ViewRecipes(
+            id=recipe_id,
+            tags=recipe_instance.tags,
+            ingredients=ingredient_amount,
+            author=author,
+            name=recipe_instance.name,
+            text=recipe_instance.text,
+            cooking_time=recipe_instance.cooking_time,
+            is_favorited=is_favorited,
+            is_in_shopping_cart=is_in_shopping_cart
+        )
     return recipe
 
 
@@ -424,7 +472,7 @@ async def delete_recipe(
     if user.get('id') != recipe_instance.author_id:
         raise HTTPException(
             status_code=403,
-            detail='You do not havea permission to delete recipe'
+            detail='You do not have a permission to delete recipe'
         )
     db.query(models.Recipe).filter(models.Recipe.id == recipe_id).delete()
     db.commit()

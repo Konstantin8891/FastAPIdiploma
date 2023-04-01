@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union, Any
 
 from pydantic import BaseModel
 
@@ -74,7 +74,7 @@ class PostIngredients(BaseModel):
 class PostRecipes(BaseModel):
     ingredients: list[PostIngredients]
     tags: list[int]
-    image: str
+    image: Optional[str]
     name: str
     text: str
     cooking_time: int
@@ -114,7 +114,7 @@ class ViewRecipes(BaseModel):
     author: ViewUser
     ingredients: list[ViewIngredients]
     name: str
-    image: Optional[str]
+    image: Optional[str] = None
     text: str
     cooking_time: int
     is_favorited: bool

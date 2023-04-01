@@ -50,6 +50,7 @@ async def create_user(user: CreateUser, db: Session = Depends(get_db)):
     user_model.first_name = user.first_name
     user_model.last_name = user.last_name
     user_model.password = get_password_hash(user.password)
+    user_model.role = 'user'
     db.add(user_model)
     db.commit()
     db.refresh(user_model)
@@ -94,6 +95,7 @@ async def get_all_users(
         sub_res['username'] = user_instance.username
         sub_res['first_name'] = user_instance.first_name
         sub_res['last_name'] = user_instance.last_name
+        sub_res['role'] = user_instance.role
         if user is None:
             sub_res['is_subscribed'] = False
         else:

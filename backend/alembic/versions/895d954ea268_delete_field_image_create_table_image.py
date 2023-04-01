@@ -20,7 +20,7 @@ def upgrade() -> None:
     op.drop_column('recipe', 'image')
     op.create_table(
         'image',
-        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('id', sa.Integer(), nullable=False, primary_key=True),
         sa.Column('name', sa.Unicode(64), nullable=False),
         sa.Column('path', sa.Unicode(128), nullable=False),
         sa.Column('url', sa.String(), nullable=False)

@@ -69,3 +69,11 @@ targ==0.3.7
 toml==0.10.2
 tomli==2.0.1
 wsproto==1.2.0
+Pillow==9.4.0
+Babel==2.12.1
+Flask-BabelEx==0.9.4
+Flask-Mail==0.9.1
+Flask-Principal==0.4.0
+blinker==1.5
+flask-security==3.0.0
+speaklater==1.3
