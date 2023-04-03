@@ -7,6 +7,7 @@ from flask_admin import Admin, AdminIndexView
 from flask_login import LoginManager
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import scoped_session, sessionmaker
+from werkzeug.urls import url_parse
 
 from .config import Config
 from .views import *
@@ -14,6 +15,7 @@ from .views import *
 import sys
 sys.path.append('..')
 
+from routers.services.password import verify_password
 from database import engine
 from models import Tag, Ingredient, Recipe, User
 from routers.auth import get_db
@@ -23,11 +25,11 @@ current_session = scoped_session(sessionmaker(
 ))
 
 def create_app() -> Flask:
+
     app = Flask(__name__, static_folder='static', static_url_path='/admin/static')
     app.config.from_object(Config)
     app.config['FLASK_ADMIN_SWATCH'] = 'Cosmo'
     app.secret_key = 'kek'
-
 
     # login_manager = LoginManager()
     # login_manager.init_app(app)
@@ -44,7 +46,7 @@ def create_app() -> Flask:
         # def secure_admin_index():
         #     return admin_index()
 
-    admin = Admin(app, name='Foodgram', index_view=AdminIndexView(name='Foodgram index', url='/admin/'), template_mode='bootstrap4')
+    admin = Admin(app, name='Foodgram index', index_view=AdminIndexView(url='/admin/'), template_mode='bootstrap4')
 
     admin.add_view(UserView(User, current_session))
     admin.add_view(TagView(Tag, current_session))
@@ -65,15 +67,35 @@ app.logger.info('FastAPI diploma startup')
 login_manager = LoginManager(app)
 # login_manager.init_app(app)
 login_manager.login_view = 'login'
+# from . import routes
 
 # @login_manager.user_loader
 # def login_loader(user_id):
 #     return User.query.get(user_id)
 #     # return db.query(User).get(user_id)
 
-from admin import models
+from admin import models, routes, forms
 
 
 @app.shell_context_processor
 def make_shell_context():
     return {'db': db, 'User': models.User}
+
+
+# @app.route('/login', methods=['GET', 'POST'])
+# def login():
+#     if current_user.is_authenticated:
+#         return redirect(url_for('index'))
+#     form = LoginForm()
+#     if form.validate_on_submit():
+#         user = User.query.filter_by(username=form.username.data).first()
+#         app.logger.info('user = ', user)
+#         if user is None or not verify_password(form.password.data, user.password):
+#             flash('Invalid username or password')
+#             return redirect(url_for('login'))
+#         login_user(user, remember=form.remember_me.data)
+#         next_page = request.args.get('next')
+#         if not next_page or url_parse(next_page).netloc != '':
+#             next_page = url_for('index')
+#         return redirect(next_page)
+#     return render_template('admin/login.html', title='Sign In', form=form)

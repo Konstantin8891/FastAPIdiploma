@@ -21,7 +21,14 @@ from routers.recipes import get_db
 PAGE_SIZE = 10
 
 
-class UserView(ModelView):
+class AddAuthorizationModelView(ModelView):
+    list_template = 'admin/list.html'
+    edit_template = 'admin/edit.html'
+    create_template = 'admin/create.html'
+    details_template = 'admin/details.html'
+
+
+class UserView(AddAuthorizationModelView):
     can_edit = True
     can_create = True
     can_delete = True
@@ -37,7 +44,7 @@ class UserView(ModelView):
     
 
 
-class TagView(ModelView):
+class TagView(AddAuthorizationModelView):
     can_edit = True
     can_create = True
     can_delete = True
@@ -51,7 +58,7 @@ class TagView(ModelView):
         return redirect(url_for('login', next=request.url))
 
 
-class IngredientView(ModelView):
+class IngredientView(AddAuthorizationModelView):
     can_edit = True
     can_create = True
     can_delete = True
@@ -65,7 +72,7 @@ class IngredientView(ModelView):
         return redirect(url_for('login', next=request.url))
 
 
-class RecipeView(ModelView):
+class RecipeView(AddAuthorizationModelView):
     can_edit = True
     can_create = False
     can_delete = True
@@ -75,7 +82,10 @@ class RecipeView(ModelView):
     column_filters = ('name', 'author.username', 'tags.name')
     column_exclude_list = ('favorites_r', 'shoppingcart_r')
     column_details_exclude_list = ('favorites_r', 'shoppingcart_r')
-    # create_template = 'create_recipe.html'
+    list_template = 'admin/list.html'
+    edit_template = 'admin/edit.html'
+    create_template = 'admin/create.html'
+    details_template = 'admin/details.html'
     inline_models = ((
         IngredientAmount,
         {
