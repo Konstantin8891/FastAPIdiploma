@@ -12,7 +12,7 @@ import sys
 sys.path.append('..')
 
 # from models import User
-from routers.services.password import verify_password
+from backend.routers.services.hash import verify_hash
 
 
 def has_no_empty_params(rule):
@@ -40,7 +40,7 @@ def login():
     if form.validate_on_submit():
         user = User.query.filter_by(username=form.username.data).first()
         app.logger.info('user = ', user)
-        if user is None or not verify_password(form.password.data, user.password):
+        if user is None or not verify_hash(form.password.data, user.password):
             flash('Invalid username or password')
             return redirect(url_for('login'))
         login_user(user, remember=form.remember_me.data)

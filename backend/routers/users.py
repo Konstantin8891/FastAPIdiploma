@@ -4,9 +4,9 @@ from fastapi import APIRouter, status, Depends, HTTPException, Security, Request
 from fastapi_pagination import add_pagination
 from sqlalchemy.orm import Session
 
-from routers.auth import get_user, get_db, get_user_or_none
-from routers.services.pagination import Page, Params
-from routers.services.password import get_password_hash, verify_password
+from .auth import get_user, get_db, get_user_or_none, get_user_and_hashed_token
+from .services.pagination import Page, Params
+from services.hash import get_hash, verify_hash
 
 import sys
 sys.path.append('..')
@@ -49,7 +49,7 @@ async def create_user(user: CreateUser, db: Session = Depends(get_db)):
     user_model.username = user.username
     user_model.first_name = user.first_name
     user_model.last_name = user.last_name
-    user_model.password = get_password_hash(user.password)
+    user_model.password = get_hash(user.password)
     user_model.role = 'user'
     db.add(user_model)
     db.commit()
@@ -65,6 +65,9 @@ async def get_all_users(
     user: Optional[dict] = Security(get_user_or_none),
     db: Session = Depends(get_db)
 ):
+    _, token_hashed = get_user_and_hashed_token(db, user)
+    if not (token_hashed and verify_hash(user.get('token'), token_hashed)):
+        user = None
     users = db.query(models.User).order_by(models.User.id).all()[
         ((page - 1) * limit):(page * limit)
     ]
@@ -114,16 +117,19 @@ async def get_all_users(
 async def get_current_user(
     user: dict = Security(get_user), db: Session = Depends(get_db)
 ):
-    user_model = db.query(models.User).get(user.get('id'))
-    is_subscribed = get_is_subscribed(user, db)
-    return ViewUser(
-        email=user_model.email,
-        id=user_model.id,
-        username=user_model.username,
-        first_name=user_model.first_name,
-        last_name=user_model.last_name,
-        is_subscribed=is_subscribed
-    )
+    user_model, token_hashed = get_user_and_hashed_token(db, user)
+    if token_hashed and verify_hash(user.get('token'), token_hashed):
+        # user_model = db.query(models.User).get(user.get('id'))
+        is_subscribed = get_is_subscribed(user, db)
+        return ViewUser(
+            email=user_model.email,
+            id=user_model.id,
+            username=user_model.username,
+            first_name=user_model.first_name,
+            last_name=user_model.last_name,
+            is_subscribed=is_subscribed
+        )
+    raise HTTPException(status_code=403, detail='Unauthorized')
 
 
 @router.get('/subscriptions/')
@@ -135,56 +141,59 @@ async def get_all_subscriptions(
     user: dict = Security(get_user),
     db: Session = Depends(get_db)
 ):
-    authors = db.query(models.Subscriber).filter(
-        models.Subscriber.user_id == user.get('id')
-    ).order_by(models.Subscriber.id).all()[
-        ((page - 1) * limit):(page * limit)
-    ]
-    count = db.query(models.Subscriber).filter(models.Subscriber.user_id == user.get('id')).count()
-    if (count % limit != 0 and count // limit + 1 < page) or (
-        count % limit == 0 and count / limit < page
-    ):
-        raise HTTPException(status_code=400, detail='Page does not exist')
-    if (count % limit != 0 and count // limit + 1 == page) or (
-        count % limit == 0 and count / limit == page
-    ):
-        next = None
-    else:
-        next = f'http://{request.client.host}:{request.url.port}/?page={page + 1}'
-    if page == 1:
-        prev = None
-    else:
-        prev = f'http://{request.client.host}:{request.url.port}/?page={page - 1}'
-    result = {}
-    result['count'] = count
-    result['next'] = next
-    result['previous'] = prev
-    result['results'] = []
-    for author in authors:
-        user_instance = db.query(models.User).get(author.author_id)
-        sub_res = {}
-        sub_res['email'] = user_instance.email
-        sub_res['id'] = user_instance.id
-        sub_res['username'] = user_instance.username
-        sub_res['first_name'] = user_instance.first_name
-        sub_res['last_name'] = user_instance.last_name
-        sub_res['is_subscribed'] = True
-        recipes = db.query(models.Recipe).filter(
-            models.Recipe.author_id == author.author_id
-        )
-        if recipe_limit:
-            recipes = recipes[:recipe_limit]
-        sub_res['recipes'] = []
-        for recipe in recipes:
-            recipe_instance = ShortRecipe(
-                id=recipe.id,
-                name=recipe.name,
-                image=recipe.image,
-                cooking_time=recipe.cooking_time
+    _, token_hashed = get_user_and_hashed_token(db, user)
+    if token_hashed and verify_hash(user.get('token'), token_hashed):
+        authors = db.query(models.Subscriber).filter(
+            models.Subscriber.user_id == user.get('id')
+        ).order_by(models.Subscriber.id).all()[
+            ((page - 1) * limit):(page * limit)
+        ]
+        count = db.query(models.Subscriber).filter(models.Subscriber.user_id == user.get('id')).count()
+        if (count % limit != 0 and count // limit + 1 < page) or (
+            count % limit == 0 and count / limit < page
+        ):
+            raise HTTPException(status_code=400, detail='Page does not exist')
+        if (count % limit != 0 and count // limit + 1 == page) or (
+            count % limit == 0 and count / limit == page
+        ):
+            next = None
+        else:
+            next = f'http://{request.client.host}:{request.url.port}/?page={page + 1}'
+        if page == 1:
+            prev = None
+        else:
+            prev = f'http://{request.client.host}:{request.url.port}/?page={page - 1}'
+        result = {}
+        result['count'] = count
+        result['next'] = next
+        result['previous'] = prev
+        result['results'] = []
+        for author in authors:
+            user_instance = db.query(models.User).get(author.author_id)
+            sub_res = {}
+            sub_res['email'] = user_instance.email
+            sub_res['id'] = user_instance.id
+            sub_res['username'] = user_instance.username
+            sub_res['first_name'] = user_instance.first_name
+            sub_res['last_name'] = user_instance.last_name
+            sub_res['is_subscribed'] = True
+            recipes = db.query(models.Recipe).filter(
+                models.Recipe.author_id == author.author_id
             )
-            sub_res['recipes'].append(recipe_instance)
-        result['results'].append(sub_res)
-    return result
+            if recipe_limit:
+                recipes = recipes[:recipe_limit]
+            sub_res['recipes'] = []
+            for recipe in recipes:
+                recipe_instance = ShortRecipe(
+                    id=recipe.id,
+                    name=recipe.name,
+                    image=recipe.image,
+                    cooking_time=recipe.cooking_time
+                )
+                sub_res['recipes'].append(recipe_instance)
+            result['results'].append(sub_res)
+        return result
+    raise HTTPException(status_code=403, detail='Unauthorized')
 
 
 @router.get('/{user_id}/', response_model=ViewUser)
@@ -193,18 +202,21 @@ async def get_user_by_id(
     db: Session = Depends(get_db),
     user: dict = Security(get_user)
 ):
-    user_model = db.query(models.User).filter(models.User.id == user_id).first()
-    if user_model is None:
-        raise HTTPException(status_code=400, detail='User does not exist')
-    is_subscribed = get_is_subscribed(user, db)
-    return ViewUser(
-        email=user_model.email,
-        id=user_model.id,
-        username=user_model.username,
-        first_name=user_model.first_name,
-        last_name=user_model.last_name,
-        is_subscribed=is_subscribed
-    )
+    _, token_hashed = get_user_and_hashed_token(db, user)
+    if token_hashed and verify_hash(user.get('token'), token_hashed):
+        user_model = db.query(models.User).filter(models.User.id == user_id).first()
+        if user_model is None:
+            raise HTTPException(status_code=400, detail='User does not exist')
+        is_subscribed = get_is_subscribed(user, db)
+        return ViewUser(
+            email=user_model.email,
+            id=user_model.id,
+            username=user_model.username,
+            first_name=user_model.first_name,
+            last_name=user_model.last_name,
+            is_subscribed=is_subscribed
+        )
+    raise HTTPException(status_code=403, detail='Unauthorized')
 
 
 @router.post('/set_password/', status_code=status.HTTP_204_NO_CONTENT)
@@ -213,11 +225,13 @@ async def set_new_password(
     user: dict = Security(get_user),
     db: Session = Depends(get_db)
 ):
-    user_model = db.query(models.User).get(user.get('id'))
-    if verify_password(passwords.current_password, user_model.password):
-        user_model.password = get_password_hash(passwords.new_password)
-    return 'changed'
-
+    user_model, token_hashed = get_user_and_hashed_token(db, user)
+    if token_hashed and verify_hash(user.get('token'), token_hashed):
+        user_model = db.query(models.User).get(user.get('id'))
+        if verify_hash(passwords.current_password, user_model.password):
+            user_model.password = get_hash(passwords.new_password)
+        return 'changed'
+    raise HTTPException(status_code=403, detail='Unauthorized')
 
 
 @router.post('/{author_id}/subscribe/', response_model=SubscribeUser)
@@ -227,43 +241,45 @@ async def get_subscribed(
     user: dict = Security(get_user),
     db: Session = Depends(get_db)
 ):
-    author = db.query(models.User).get(author_id)
-    if author is None:
-        raise HTTPException(status_code=400, detail='author does not exist')
-    subscription = db.query(models.Subscriber).filter(
-        models.Subscriber.author_id == author_id
-    ).filter(models.Subscriber.user_id == user.get('id')).first()
-    if subscription is not None:
-        raise HTTPException(status_code=400, detail='already subscribed')
-    subscribe = models.Subscriber()
-    subscribe.author_id = author_id
-    subscribe.user_id = user.get('id')
-    db.add(subscribe)
-    db.commit()
-    if recipe_limit:
-        recipes = db.query(models.Recipe).filter(
+    _, token_hashed = get_user_and_hashed_token(db, user)
+    if token_hashed and verify_hash(user.get('token'), token_hashed):
+        author = db.query(models.User).get(author_id)
+        if author is None:
+            raise HTTPException(status_code=400, detail='author does not exist')
+        subscription = db.query(models.Subscriber).filter(
+            models.Subscriber.author_id == author_id
+        ).filter(models.Subscriber.user_id == user.get('id')).first()
+        if subscription is not None:
+            raise HTTPException(status_code=400, detail='already subscribed')
+        subscribe = models.Subscriber()
+        subscribe.author_id = author_id
+        subscribe.user_id = user.get('id')
+        db.add(subscribe)
+        db.commit()
+        if recipe_limit:
+            recipes = db.query(models.Recipe).filter(
+                models.Recipe.author_id == author_id
+            )[:recipe_limit]
+        else:
+            recipes = db.query(models.Recipe).filter(
+                models.Recipe.author_id == author_id
+            )
+        recipe_count = db.query(models.Recipe).filter(
             models.Recipe.author_id == author_id
-        )[:recipe_limit]
-    else:
-        recipes = db.query(models.Recipe).filter(
-            models.Recipe.author_id == author_id
+        ).count()
+        recipes = recipes.all()
+        user_instance = SubscribeUser(
+            email=author.email,
+            id=author_id,
+            username=author.username,
+            first_name=author.first_name,
+            last_name=author.last_name,
+            is_subscribed=True,
+            recipes=recipes,
+            recipe_count=recipe_count
         )
-    print(recipes)
-    recipe_count = db.query(models.Recipe).filter(
-        models.Recipe.author_id == author_id
-    ).count()
-    recipes = recipes.all()
-    user_instance = SubscribeUser(
-        email=author.email,
-        id=author_id,
-        username=author.username,
-        first_name=author.first_name,
-        last_name=author.last_name,
-        is_subscribed=True,
-        recipes=recipes,
-        recipe_count=recipe_count
-    )
-    return user_instance
+        return user_instance
+    raise HTTPException(status_code=403, detail='Unauthorized')
 
 
 @router.delete(
@@ -274,16 +290,19 @@ async def unsubscribe(
     user: dict = Security(get_user),
     db: Session = Depends(get_db)
 ):
-    author = db.query(models.User).get(author_id)
-    if author is None:
-        raise HTTPException(status_code=400, detail='author does not exist')
-    subscription = db.query(models.Subscriber).filter(
-        models.Subscriber.author_id == author_id
-    ).filter(models.Subscriber.user_id == user.get('id')).first()
-    if subscription is None:
-        raise HTTPException(status_code=400, detail="you're not subscribed")
-    db.query(models.Subscriber).filter(
-        models.Subscriber.author_id == author_id
-    ).filter(models.Subscriber.user_id == user.get('id')).delete()
-    db.commit()
-    return 'deleted'
+    _, token_hashed = get_user_and_hashed_token(db, user)
+    if token_hashed and verify_hash(user.get('token'), token_hashed):
+        author = db.query(models.User).get(author_id)
+        if author is None:
+            raise HTTPException(status_code=400, detail='author does not exist')
+        subscription = db.query(models.Subscriber).filter(
+            models.Subscriber.author_id == author_id
+        ).filter(models.Subscriber.user_id == user.get('id')).first()
+        if subscription is None:
+            raise HTTPException(status_code=400, detail="you're not subscribed")
+        db.query(models.Subscriber).filter(
+            models.Subscriber.author_id == author_id
+        ).filter(models.Subscriber.user_id == user.get('id')).delete()
+        db.commit()
+        return 'deleted'
+    raise HTTPException(status_code=403, detail='Unauthorized')

@@ -23,7 +23,7 @@ sys.path.append('..')
 from database import engine
 from models import Tag, Ingredient, Recipe, User
 from routers.auth import get_db
-from routers.services.password import verify_password
+from backend.routers.services.hash import verify_hash
  
 # app = Flask(__name__)
 

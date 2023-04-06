@@ -14,14 +14,16 @@ from fastapi_pagination.ext.sqlalchemy import paginate
 from sqlalchemy import delete
 from sqlalchemy.orm import Session, selectinload, load_only
 
-from .auth import get_db, get_user, get_user_or_none
-from routers.services.pagination import Page, Params
-from routers.users import get_is_subscribed
+from .auth import get_db, get_user, get_user_or_none, get_user_and_hashed_token
+from .services.hash import get_hash, verify_hash
+from .services.pagination import Page, Params
+from .users import get_is_subscribed
 
 import sys
 sys.path.append('..')
 
 from schemas import PostRecipes, ViewRecipes, ShortRecipe, ViewUser
+from database import redis_db
 
 import models
 
@@ -87,28 +89,31 @@ def get_image_url(image_id: int, db: Session):
 async def get_shopping_cart(
     user: dict = Security(get_user), db: Session = Depends(get_db)
 ):
-    shopping_list = []
-    instances = db.query(models.ShoppingCart).filter(
-        models.ShoppingCart.user_id == user.get('id')
-    )
-    for instance in instances:
-        recipe = db.query(models.Recipe).get(instance.recipe_id)
-        ingredients_amount = db.query(models.IngredientAmount).filter(
-            models.IngredientAmount.recipe_id == instance.recipe_id
+    _, token_hashed = get_user_and_hashed_token(db, user)
+    if token_hashed and verify_hash(user.get('token'), token_hashed):
+        shopping_list = []
+        instances = db.query(models.ShoppingCart).filter(
+            models.ShoppingCart.user_id == user.get('id')
         )
-        for ingredient_amount in ingredients_amount:
-            ingredient = db.query(models.Ingredient).get(
-                ingredient_amount.ingredient_id
+        for instance in instances:
+            recipe = db.query(models.Recipe).get(instance.recipe_id)
+            ingredients_amount = db.query(models.IngredientAmount).filter(
+                models.IngredientAmount.recipe_id == instance.recipe_id
             )
-            shopping_list.append(
-                f"{recipe.name}: {ingredient.name}"
-                f" - {ingredient_amount.amount}\n"
-            )            
-        f = open("shopping_cart.txt", "w")
-        for shopping in shopping_list:
-            f.write(shopping)
-        f.close()
-        return FileResponse('shopping_cart.txt')
+            for ingredient_amount in ingredients_amount:
+                ingredient = db.query(models.Ingredient).get(
+                    ingredient_amount.ingredient_id
+                )
+                shopping_list.append(
+                    f"{recipe.name}: {ingredient.name}"
+                    f" - {ingredient_amount.amount}\n"
+                )            
+            f = open("shopping_cart.txt", "w")
+            for shopping in shopping_list:
+                f.write(shopping)
+            f.close()
+            return FileResponse('shopping_cart.txt')
+    raise HTTPException(status=403, detail='Unauthorithed')
 
 
 @router.post('/', status_code=status.HTTP_201_CREATED)
@@ -118,80 +123,83 @@ async def create_recipe(
     user: dict = Security(get_user),
     db: Session = Depends(get_db)
 ):
-    recipe_model = models.Recipe() #  источники данных
-    recipe_model.text = recipe.text
-    if recipe.image:
-        ext = save_image(recipe.image, recipe.name)
-        image = models.Image(
-            name=recipe.name,
-            path=recipe.name.lower() + 'jpg',
-            url=f'http://{request.client.host}:{request.url.port}/media/'
-                f'recipes/images/{recipe.name}.{ext}'
-        )
-        db.add(image)
-        db.commit()
-        db.refresh(image)
+    author_instance, token_hashed = get_user_and_hashed_token(db, user)
+    if token_hashed and verify_hash(user.get('token'), token_hashed):
+        recipe_model = models.Recipe() #  источники данных
+        recipe_model.text = recipe.text
+        if recipe.image:
+            ext = save_image(recipe.image, recipe.name)
+            image = models.Image(
+                name=recipe.name,
+                path=recipe.name.lower() + 'jpg',
+                url=f'http://{request.client.host}:{request.url.port}/media/'
+                    f'recipes/images/{recipe.name}.{ext}'
+            )
+            db.add(image)
+            db.commit()
+            db.refresh(image)
 
-    recipe_model.name = recipe.name
-    recipe_model.cooking_time = recipe.cooking_time
-    recipe_model.created = datetime.now()
-    recipe_model.author_id = user.get('id')
-    if recipe.image:
-        recipe_model.image_id = image.id
-    db.add(recipe_model)
-    db.commit()
-    db.refresh(recipe_model)
-    for tag in recipe.tags:
-        tag_model = db.query(models.Tag).get(tag)
-        recipe_model.tags.append(tag_model)
-    db.commit() # конец
-    for ingredient in recipe.ingredients: 
-        ingredient_amount = models.IngredientAmount()
-        ingredient_amount.ingredient_id = ingredient.id
-        ingredient_amount.recipe_id = recipe_model.id
-        ingredient_amount.amount = ingredient.amount
-        db.add(ingredient_amount)
+        recipe_model.name = recipe.name
+        recipe_model.cooking_time = recipe.cooking_time
+        recipe_model.created = datetime.now()
+        recipe_model.author_id = user.get('id')
+        if recipe.image:
+            recipe_model.image_id = image.id
+        db.add(recipe_model)
         db.commit()
-        db.refresh(ingredient_amount)
-        recipe_model.ingredients.append(ingredient_amount)
-        db.commit()
-    author_instance = db.query(models.User).get(user.get('id'))
-    is_subscribed = get_is_subscribed(user, db) # бизнес-логика + репо
-    author = ViewUser(
-        email=author_instance.email,
-        id=author_instance.id,
-        username=author_instance.username,
-        first_name=author_instance.first_name,
-        last_name=author_instance.last_name,
-        is_subscribed=is_subscribed
-    ) # entity + dto + бизнес-логика
-    ingredient_amount = build_ingredients(recipe_model.ingredients, db, recipe_model)
-    if recipe.image:
-        recipe_view_instance = ViewRecipes(
-            id=recipe_model.id,
-            tags=recipe_model.tags,
-            ingredients=ingredient_amount,
-            author=author,
-            name=recipe.name,
-            image=image.url,
-            text=recipe.text,
-            cooking_time=recipe.cooking_time,
-            is_favorited=False,
-            is_in_shopping_cart=False
-        )
-    else:
-        recipe_view_instance = ViewRecipes(
-            id=recipe_model.id,
-            tags=recipe_model.tags,
-            ingredients=ingredient_amount,
-            author=author,
-            name=recipe.name,
-            text=recipe.text,
-            cooking_time=recipe.cooking_time,
-            is_favorited=False,
-            is_in_shopping_cart=False
-        )
-    return recipe_view_instance
+        db.refresh(recipe_model)
+        for tag in recipe.tags:
+            tag_model = db.query(models.Tag).get(tag)
+            recipe_model.tags.append(tag_model)
+        db.commit() # конец
+        for ingredient in recipe.ingredients: 
+            ingredient_amount = models.IngredientAmount()
+            ingredient_amount.ingredient_id = ingredient.id
+            ingredient_amount.recipe_id = recipe_model.id
+            ingredient_amount.amount = ingredient.amount
+            db.add(ingredient_amount)
+            db.commit()
+            db.refresh(ingredient_amount)
+            recipe_model.ingredients.append(ingredient_amount)
+            db.commit()
+        # author_instance = db.query(models.User).get(user.get('id'))
+        is_subscribed = get_is_subscribed(user, db) # бизнес-логика + репо
+        author = ViewUser(
+            email=author_instance.email,
+            id=author_instance.id,
+            username=author_instance.username,
+            first_name=author_instance.first_name,
+            last_name=author_instance.last_name,
+            is_subscribed=is_subscribed
+        ) # entity + dto + бизнес-логика
+        ingredient_amount = build_ingredients(recipe_model.ingredients, db, recipe_model)
+        if recipe.image:
+            recipe_view_instance = ViewRecipes(
+                id=recipe_model.id,
+                tags=recipe_model.tags,
+                ingredients=ingredient_amount,
+                author=author,
+                name=recipe.name,
+                image=image.url,
+                text=recipe.text,
+                cooking_time=recipe.cooking_time,
+                is_favorited=False,
+                is_in_shopping_cart=False
+            )
+        else:
+            recipe_view_instance = ViewRecipes(
+                id=recipe_model.id,
+                tags=recipe_model.tags,
+                ingredients=ingredient_amount,
+                author=author,
+                name=recipe.name,
+                text=recipe.text,
+                cooking_time=recipe.cooking_time,
+                is_favorited=False,
+                is_in_shopping_cart=False
+            )
+        return recipe_view_instance
+    raise HTTPException(status_code=403, detail='Unauthorized')
 
 
 @router.get('/')
@@ -316,6 +324,9 @@ async def get_recipe_by_id(
     db: Session = Depends(get_db),
     user: dict = Security(get_user_or_none)
 ):
+    user_instance, token_hashed = get_user_and_hashed_token(db, user)
+    if not (token_hashed and verify_hash(user.get('token'), token_hashed)):
+        user = None
     recipe_instance = db.query(models.Recipe).get(recipe_id)
     image_url = get_image_url(recipe_instance.image_id, db)
     if recipe_instance is None:
@@ -371,92 +382,95 @@ async def patch_recipe(
     db: Session = Depends(get_db),
     user: dict = Security(get_user)
 ):
-    recipe_instance = db.query(models.Recipe).get(recipe_id)
-    if recipe_instance.author_id != user.get('id'):
-        raise HTTPException(
-            status_code=403, detail='You have no rights to edit this recipe'
-        )
-    if recipe_instance.image:
-        try:
-            image = db.query(models.Image).filter(models.Image == recipe.name).first()
-            if image:
-                path = image.path
-                _, ext = path.split('.')
-                os.remove(os.path(f'media/recipes/images/{recipe.name}.{ext}'))
-        except OSError:
-            pass
-        ext = save_image(recipe.image, recipe.name)
-        image = models.Image(
-            name=recipe.name,
-            path=recipe.name.lower() + 'jpg',
-            url=f'http://{request.client.host}:{request.url.port}/media/'
-                f'recipes/images/{recipe.name}.{ext}'
-        )
-        db.add(image)
+    author_instance, token_hashed = get_user_and_hashed_token(db, user)
+    if token_hashed and verify_hash(user.get('token'), token_hashed):
+        recipe_instance = db.query(models.Recipe).get(recipe_id)
+        if recipe_instance.author_id != user.get('id'):
+            raise HTTPException(
+                status_code=403, detail='You have no rights to edit this recipe'
+            )
+        if recipe_instance.image:
+            try:
+                image = db.query(models.Image).filter(models.Image == recipe.name).first()
+                if image:
+                    path = image.path
+                    _, ext = path.split('.')
+                    os.remove(os.path(f'media/recipes/images/{recipe.name}.{ext}'))
+            except OSError:
+                pass
+            ext = save_image(recipe.image, recipe.name)
+            image = models.Image(
+                name=recipe.name,
+                path=recipe.name.lower() + 'jpg',
+                url=f'http://{request.client.host}:{request.url.port}/media/'
+                    f'recipes/images/{recipe.name}.{ext}'
+            )
+            db.add(image)
+            db.commit()
+            db.refresh(image)
+            recipe_instance.image_id = image.id
+        recipe_instance.name = recipe.name
+        recipe_instance.text = recipe.text
+        recipe_instance.cooking_time = recipe.cooking_time
+        recipe_instance.ingredients = []
+        for ingredient in recipe.ingredients:
+            ingredient_amount_instance = models.IngredientAmount()
+            ingredient_amount_instance.ingredient_id = ingredient.id
+            ingredient_amount_instance.recipe_id = recipe_id
+            ingredient_amount_instance.amount = ingredient.amount
+            db.add(ingredient_amount_instance)
+            db.commit()
+            db.refresh(ingredient_amount_instance)
+            recipe_instance.ingredients.append(ingredient_amount_instance)
+            db.commit()        
+        recipe_instance.tags = []
+        for tag in recipe.tags:
+            tag_model = db.query(models.Tag).get(tag)
+            recipe_instance.tags.append(tag_model)
         db.commit()
-        db.refresh(image)
-        recipe_instance.image_id = image.id
-    recipe_instance.name = recipe.name
-    recipe_instance.text = recipe.text
-    recipe_instance.cooking_time = recipe.cooking_time
-    recipe_instance.ingredients = []
-    for ingredient in recipe.ingredients:
-        ingredient_amount_instance = models.IngredientAmount()
-        ingredient_amount_instance.ingredient_id = ingredient.id
-        ingredient_amount_instance.recipe_id = recipe_id
-        ingredient_amount_instance.amount = ingredient.amount
-        db.add(ingredient_amount_instance)
-        db.commit()
-        db.refresh(ingredient_amount_instance)
-        recipe_instance.ingredients.append(ingredient_amount_instance)
-        db.commit()        
-    recipe_instance.tags = []
-    for tag in recipe.tags:
-        tag_model = db.query(models.Tag).get(tag)
-        recipe_instance.tags.append(tag_model)
-    db.commit()
-    ingredient_amount = build_ingredients(
-        recipe_instance.ingredients, db, recipe_instance
-    )
-    author_instance = db.query(models.User).get(user.get('id'))
+        ingredient_amount = build_ingredients(
+            recipe_instance.ingredients, db, recipe_instance
+        )
+        # author_instance = db.query(models.User).get(user.get('id'))
 
-    is_favorited = get_favorites(recipe_id, user, db)
-    is_subscribed = get_is_subscribed(user, db)
-    author = ViewUser(
-        email=author_instance.email,
-        id=author_instance.id,
-        username=author_instance.username,
-        first_name=author_instance.first_name,
-        last_name=author_instance.last_name,
-        is_subscribed=is_subscribed
-    )
-    is_in_shopping_cart = build_shopping_cart(user, recipe_id, db)
-    if recipe_instance.image:
-        recipe = ViewRecipes(
-            id=recipe_id,
-            tags=recipe_instance.tags,
-            ingredients=ingredient_amount,
-            author=author,
-            name=recipe_instance.name,
-            image=image.url,
-            text=recipe_instance.text,
-            cooking_time=recipe_instance.cooking_time,
-            is_favorited=is_favorited,
-            is_in_shopping_cart=is_in_shopping_cart
+        is_favorited = get_favorites(recipe_id, user, db)
+        is_subscribed = get_is_subscribed(user, db)
+        author = ViewUser(
+            email=author_instance.email,
+            id=author_instance.id,
+            username=author_instance.username,
+            first_name=author_instance.first_name,
+            last_name=author_instance.last_name,
+            is_subscribed=is_subscribed
         )
-    else:
-        recipe = ViewRecipes(
-            id=recipe_id,
-            tags=recipe_instance.tags,
-            ingredients=ingredient_amount,
-            author=author,
-            name=recipe_instance.name,
-            text=recipe_instance.text,
-            cooking_time=recipe_instance.cooking_time,
-            is_favorited=is_favorited,
-            is_in_shopping_cart=is_in_shopping_cart
-        )
-    return recipe
+        is_in_shopping_cart = build_shopping_cart(user, recipe_id, db)
+        if recipe_instance.image:
+            recipe = ViewRecipes(
+                id=recipe_id,
+                tags=recipe_instance.tags,
+                ingredients=ingredient_amount,
+                author=author,
+                name=recipe_instance.name,
+                image=image.url,
+                text=recipe_instance.text,
+                cooking_time=recipe_instance.cooking_time,
+                is_favorited=is_favorited,
+                is_in_shopping_cart=is_in_shopping_cart
+            )
+        else:
+            recipe = ViewRecipes(
+                id=recipe_id,
+                tags=recipe_instance.tags,
+                ingredients=ingredient_amount,
+                author=author,
+                name=recipe_instance.name,
+                text=recipe_instance.text,
+                cooking_time=recipe_instance.cooking_time,
+                is_favorited=is_favorited,
+                is_in_shopping_cart=is_in_shopping_cart
+            )
+        return recipe
+    raise HTTPException(status_code=403, detail='Unauthorized')
 
 
 @router.delete('/{recipe_id}/', status_code=204)
@@ -465,18 +479,21 @@ async def delete_recipe(
     user: dict = Security(get_user),
     db: Session = Depends(get_db)
 ):
-    author_instance = db.query(models.User).get(user.get('id'))
-    recipe_instance = db.query(models.Recipe).get(recipe_id)
-    if recipe_instance is None:
-        raise HTTPException(status_code=400, detail='Recipe does not exist')
-    if user.get('id') != recipe_instance.author_id:
-        raise HTTPException(
-            status_code=403,
-            detail='You do not have a permission to delete recipe'
-        )
-    db.query(models.Recipe).filter(models.Recipe.id == recipe_id).delete()
-    db.commit()
-    return 'deleted'
+    author_instance, token_hashed = get_user_and_hashed_token(db, user)
+    if token_hashed and verify_hash(user.get('token'), token_hashed):
+    # author_instance = db.query(models.User).get(user.get('id'))
+        recipe_instance = db.query(models.Recipe).get(recipe_id)
+        if recipe_instance is None:
+            raise HTTPException(status_code=400, detail='Recipe does not exist')
+        if user.get('id') != recipe_instance.author_id:
+            raise HTTPException(
+                status_code=403,
+                detail='You do not have a permission to delete recipe'
+            )
+        db.query(models.Recipe).filter(models.Recipe.id == recipe_id).delete()
+        db.commit()
+        return 'deleted'
+    raise HTTPException(status_code=403, detail='Unauthorized')
 
 
 @router.post('/{recipe_id}/favorite/', status_code=201)
@@ -485,28 +502,32 @@ async def add_to_favorites(
     user: dict = Security(get_user),
     db: Session = Depends(get_db)
 ):
-    recipe = db.query(models.Recipe).get(recipe_id)
-    if recipe is None:
-        raise HTTPException(status_code=400, detail='recipe does not exist')
-    favorite = db.query(models.Favorite).filter(
-        models.Favorite.user_id == user.get('id')
-    ).filter(models.Favorite.recipe_id == recipe_id).first()
-    if favorite is not None:
-        raise HTTPException(
-            status_code=400, detail='recipe is already in favorites'
+    _, token_hashed = get_user_and_hashed_token(db, user)
+    if token_hashed and verify_hash(user.get('token'), token_hashed):
+        recipe = db.query(models.Recipe).get(recipe_id)
+        if recipe is None:
+            raise HTTPException(status_code=400, detail='recipe does not exist')
+        favorite = db.query(models.Favorite).filter(
+            models.Favorite.user_id == user.get('id')
+        ).filter(models.Favorite.recipe_id == recipe_id).first()
+        if favorite is not None:
+            raise HTTPException(
+                status_code=400, detail='recipe is already in favorites'
+            )
+        favorite_instance = models.Favorite()
+        favorite_instance.user_id = user.get('id')
+        favorite_instance.recipe_id = recipe_id
+        db.add(favorite_instance)
+        db.commit()
+        recipe = ShortRecipe(
+            id=recipe_id,
+            name=recipe.name,
+            image=recipe.image,
+            cooking_time=recipe.cooking_time
         )
-    favorite_instance = models.Favorite()
-    favorite_instance.user_id = user.get('id')
-    favorite_instance.recipe_id = recipe_id
-    db.add(favorite_instance)
-    db.commit()
-    recipe = ShortRecipe(
-        id=recipe_id,
-        name=recipe.name,
-        image=recipe.image,
-        cooking_time=recipe.cooking_time
-    )
-    return recipe
+        return recipe
+    raise HTTPException(status_code=403, detail='Unauthorized')
+
 
 @router.delete('/{recipe_id}/favorite/', status_code=204)
 async def delete_from_favorites(
@@ -514,21 +535,24 @@ async def delete_from_favorites(
     user: dict = Security(get_user),
     db: Session = Depends(get_db)
 ):
-    recipe = db.query(models.Recipe).get(recipe_id)
-    if recipe is None:
-        raise HTTPException(status_code=400, detail='recipe does not exist')
-    favorite = db.query(models.Favorite).filter(
-        models.Favorite.user_id == user.get('id')
-    ).filter(models.Favorite.recipe_id == recipe_id).first()
-    if favorite is None:
-        raise HTTPException(
-            status_code=400, detail='recipe is not in favorites'
-        )
-    db.query(models.Favorite).filter(
-        models.Favorite.user_id == user.get('id')
-    ).filter(models.Favorite.recipe_id == recipe_id).delete()
-    db.commit()
-    return 'deleted'
+    _, token_hashed = get_user_and_hashed_token(db, user)
+    if token_hashed and verify_hash(user.get('token'), token_hashed):
+        recipe = db.query(models.Recipe).get(recipe_id)
+        if recipe is None:
+            raise HTTPException(status_code=400, detail='recipe does not exist')
+        favorite = db.query(models.Favorite).filter(
+            models.Favorite.user_id == user.get('id')
+        ).filter(models.Favorite.recipe_id == recipe_id).first()
+        if favorite is None:
+            raise HTTPException(
+                status_code=400, detail='recipe is not in favorites'
+            )
+        db.query(models.Favorite).filter(
+            models.Favorite.user_id == user.get('id')
+        ).filter(models.Favorite.recipe_id == recipe_id).delete()
+        db.commit()
+        return 'deleted'
+    raise HTTPException(status_code=403, detail='Unauthorized')
 
 
 @router.post('/{recipe_id}/shopping_cart/', response_model=ShortRecipe)
@@ -537,21 +561,24 @@ async def add_to_shopping_cart(
     user: dict = Security(get_user),
     db: Session = Depends(get_db)
 ):
-    recipe = db.query(models.Recipe).get(recipe_id)
-    if recipe is None:
-        raise HTTPException(status_code=400, detail='recipe not found')
-    shopping_cart = models.ShoppingCart()
-    shopping_cart.recipe_id = recipe_id
-    shopping_cart.user_id = user.get('id')
-    db.add(shopping_cart)
-    db.commit()
-    recipe = ShortRecipe(
-        id=recipe_id,
-        name=recipe.name,
-        image=recipe.image,
-        cooking_time=recipe.cooking_time
-    )
-    return recipe
+    _, token_hashed = get_user_and_hashed_token(db, user)
+    if token_hashed and verify_hash(user.get('token'), token_hashed):
+        recipe = db.query(models.Recipe).get(recipe_id)
+        if recipe is None:
+            raise HTTPException(status_code=400, detail='recipe not found')
+        shopping_cart = models.ShoppingCart()
+        shopping_cart.recipe_id = recipe_id
+        shopping_cart.user_id = user.get('id')
+        db.add(shopping_cart)
+        db.commit()
+        recipe = ShortRecipe(
+            id=recipe_id,
+            name=recipe.name,
+            image=recipe.image,
+            cooking_time=recipe.cooking_time
+        )
+        return recipe
+    raise HTTPException(status_code=403, detail='Unauthorized')
 
 
 @router.delete('/{recipe_id}/shopping_cart/')
@@ -560,16 +587,19 @@ async def delete_from_shopping_cart(
     user: dict = Security(get_user),
     db: Session = Depends(get_db)
 ):
-    recipe = db.query(models.Recipe).get(recipe_id)
-    if recipe is None:
-        raise HTTPException(status_code=400, detail='recipe not found')
-    favorite = db.query(models.ShoppingCart).filter(
-        models.ShoppingCart.user_id == user.get('id')
-    ).filter(models.ShoppingCart.recipe_id == recipe.id).first()
-    if favorite is None:
-        raise HTTPException(status_code=400, detail='recipe is not in favorited')
-    db.query(models.ShoppingCart).filter(
-        models.ShoppingCart.user_id == user.get('id')
-    ).filter(models.ShoppingCart.recipe_id == recipe.id).delete()
-    db.commit()
-    return 'deleted'
+    author_instance, token_hashed = get_user_and_hashed_token(db, user)
+    if token_hashed and verify_hash(user.get('token'), token_hashed):
+        recipe = db.query(models.Recipe).get(recipe_id)
+        if recipe is None:
+            raise HTTPException(status_code=400, detail='recipe not found')
+        favorite = db.query(models.ShoppingCart).filter(
+            models.ShoppingCart.user_id == user.get('id')
+        ).filter(models.ShoppingCart.recipe_id == recipe.id).first()
+        if favorite is None:
+            raise HTTPException(status_code=400, detail='recipe is not in favorited')
+        db.query(models.ShoppingCart).filter(
+            models.ShoppingCart.user_id == user.get('id')
+        ).filter(models.ShoppingCart.recipe_id == recipe.id).delete()
+        db.commit()
+        return 'deleted'
+    raise HTTPException(status_code=403, detail='Unauthorized')

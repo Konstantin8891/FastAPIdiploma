@@ -127,7 +127,7 @@ class ViewRecipes(BaseModel):
 class ShortRecipe(BaseModel):
     id: int
     name: str
-    image: str
+    image: Optional[str]
     cooking_time: int
 
     class Config:
