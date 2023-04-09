@@ -15,7 +15,7 @@ from .views import *
 import sys
 sys.path.append('..')
 
-from backend.routers.services.hash import verify_hash
+from routers.services.hash import verify_hash
 from database import engine
 from models import Tag, Ingredient, Recipe, User
 from routers.auth import get_db

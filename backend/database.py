@@ -1,4 +1,4 @@
-from redis import Redis
+from redis import Redis, ConnectionPool
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
@@ -14,4 +14,5 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
 
-redis_db = Redis(password='redis')
+pool = ConnectionPool(host='localhost', port=6379, db=0)
+redis_db = Redis(connection_pool=pool, password='redis')

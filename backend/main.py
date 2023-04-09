@@ -1,6 +1,8 @@
 import uvicorn
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.routing import Mount
 from fastapi.staticfiles import StaticFiles
 from fastapi_keycloak import FastAPIKeycloak, OIDCUser
@@ -27,6 +29,15 @@ def start_application():
     return app
 
 app = start_application()
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={"detail": exc.errors()},
+    )
+
 # idp = FastAPIKeycloak(
 #     server_url="http://localhost:8085/", # frontend
 #     client_id="test-client",

@@ -94,7 +94,7 @@ async def get_shopping_cart(
         shopping_list = []
         instances = db.query(models.ShoppingCart).filter(
             models.ShoppingCart.user_id == user.get('id')
-        )
+        ).all()
         for instance in instances:
             recipe = db.query(models.Recipe).get(instance.recipe_id)
             ingredients_amount = db.query(models.IngredientAmount).filter(
@@ -108,11 +108,11 @@ async def get_shopping_cart(
                     f"{recipe.name}: {ingredient.name}"
                     f" - {ingredient_amount.amount}\n"
                 )            
-            f = open("shopping_cart.txt", "w")
-            for shopping in shopping_list:
-                f.write(shopping)
-            f.close()
-            return FileResponse('shopping_cart.txt')
+        f = open("shopping_cart.txt", "w")
+        for shopping in shopping_list:
+            f.write(shopping)
+        f.close()
+        return FileResponse('shopping_cart.txt')
     raise HTTPException(status=403, detail='Unauthorithed')
 
 
@@ -163,14 +163,14 @@ async def create_recipe(
             recipe_model.ingredients.append(ingredient_amount)
             db.commit()
         # author_instance = db.query(models.User).get(user.get('id'))
-        is_subscribed = get_is_subscribed(user, db) # бизнес-логика + репо
+        # бизнес-логика + репо
         author = ViewUser(
             email=author_instance.email,
             id=author_instance.id,
             username=author_instance.username,
             first_name=author_instance.first_name,
             last_name=author_instance.last_name,
-            is_subscribed=is_subscribed
+            is_subscribed=False
         ) # entity + dto + бизнес-логика
         ingredient_amount = build_ingredients(recipe_model.ingredients, db, recipe_model)
         if recipe.image:
@@ -253,7 +253,15 @@ async def get_all_recipes(
             recipes = Query(None)
 
     count = recipes.count()
-    if (count % limit != 0 and count // limit + 1 < page) or (
+    if count == 0:
+        result = {}
+        result['count'] = 0
+        result['next'] = None
+        result['previous'] = None
+        result['results'] = None
+        return result
+
+    elif (count % limit != 0 and count // limit + 1 < page) or (
         count % limit == 0 and count / limit < page
     ):
         raise HTTPException(status_code=400, detail='Page does not exist')
@@ -291,7 +299,7 @@ async def get_all_recipes(
         if user is None:
             is_subscribed = False
         else:
-            is_subscribed = get_is_subscribed(user, db)
+            is_subscribed = get_is_subscribed(user, recipe.author_id, db)
         author = ViewUser(
             email=author_instance.email,
             id=author_instance.id,
@@ -350,7 +358,7 @@ async def get_recipe_by_id(
     if user is None:
         is_subscribed = False
     else:
-        is_subscribed = get_is_subscribed(user, db)
+        is_subscribed = get_is_subscribed(user, recipe_instance.author_id, db)
     author = ViewUser(
         email=author_instance.email,
         id=author_instance.id,
@@ -385,30 +393,32 @@ async def patch_recipe(
     author_instance, token_hashed = get_user_and_hashed_token(db, user)
     if token_hashed and verify_hash(user.get('token'), token_hashed):
         recipe_instance = db.query(models.Recipe).get(recipe_id)
+        if recipe_instance is None:
+            raise HTTPException(status_code=404, detail='Recipe not found')
         if recipe_instance.author_id != user.get('id'):
             raise HTTPException(
                 status_code=403, detail='You have no rights to edit this recipe'
             )
-        if recipe_instance.image:
-            try:
-                image = db.query(models.Image).filter(models.Image == recipe.name).first()
-                if image:
-                    path = image.path
-                    _, ext = path.split('.')
-                    os.remove(os.path(f'media/recipes/images/{recipe.name}.{ext}'))
-            except OSError:
-                pass
-            ext = save_image(recipe.image, recipe.name)
-            image = models.Image(
-                name=recipe.name,
-                path=recipe.name.lower() + 'jpg',
-                url=f'http://{request.client.host}:{request.url.port}/media/'
-                    f'recipes/images/{recipe.name}.{ext}'
-            )
-            db.add(image)
-            db.commit()
-            db.refresh(image)
-            recipe_instance.image_id = image.id
+        # if recipe_instance.image:
+        try:
+            image = db.query(models.Image).filter(models.Image == recipe.name).first()
+            if image:
+                path = image.path
+                _, ext = path.split('.')
+                os.remove(os.path(f'media/recipes/images/{recipe.name}.{ext}'))
+        except OSError:
+            pass
+        ext = save_image(recipe.image, recipe.name)
+        image = models.Image(
+            name=recipe.name,
+            path=recipe.name.lower() + 'jpg',
+            url=f'http://{request.client.host}:{request.url.port}/media/'
+                f'recipes/images/{recipe.name}.{ext}'
+        )
+        db.add(image)
+        db.commit()
+        db.refresh(image)
+        recipe_instance.image_id = image.id
         recipe_instance.name = recipe.name
         recipe_instance.text = recipe.text
         recipe_instance.cooking_time = recipe.cooking_time
@@ -434,7 +444,7 @@ async def patch_recipe(
         # author_instance = db.query(models.User).get(user.get('id'))
 
         is_favorited = get_favorites(recipe_id, user, db)
-        is_subscribed = get_is_subscribed(user, db)
+        is_subscribed = get_is_subscribed(user, recipe_instance.author_id, db)
         author = ViewUser(
             email=author_instance.email,
             id=author_instance.id,
@@ -484,16 +494,22 @@ async def delete_recipe(
     # author_instance = db.query(models.User).get(user.get('id'))
         recipe_instance = db.query(models.Recipe).get(recipe_id)
         if recipe_instance is None:
-            raise HTTPException(status_code=400, detail='Recipe does not exist')
+            raise HTTPException(status_code=404, detail='Recipe does not exist')
         if user.get('id') != recipe_instance.author_id:
             raise HTTPException(
                 status_code=403,
                 detail='You do not have a permission to delete recipe'
             )
+        favorite = db.query(models.Favorite).filter(models.Favorite.recipe_id == recipe_id).filter(models.Favorite.user_id == author_instance.id)
+        if favorite:
+            favorite.delete()
+        shopping_cart = db.query(models.ShoppingCart).filter(models.ShoppingCart.user_id == author_instance.id).filter(models.ShoppingCart.recipe_id == recipe_id)
+        if shopping_cart:
+            shopping_cart.delete()
         db.query(models.Recipe).filter(models.Recipe.id == recipe_id).delete()
         db.commit()
         return 'deleted'
-    raise HTTPException(status_code=403, detail='Unauthorized')
+    raise HTTPException(status_code=401, detail='Unauthorized')
 
 
 @router.post('/{recipe_id}/favorite/', status_code=201)
@@ -529,7 +545,7 @@ async def add_to_favorites(
     raise HTTPException(status_code=403, detail='Unauthorized')
 
 
-@router.delete('/{recipe_id}/favorite/', status_code=204)
+@router.delete('/{recipe_id}/favorite/', status_code=status.HTTP_204_NO_CONTENT)
 async def delete_from_favorites(
     recipe_id: int,
     user: dict = Security(get_user),
@@ -563,7 +579,12 @@ async def add_to_shopping_cart(
 ):
     _, token_hashed = get_user_and_hashed_token(db, user)
     if token_hashed and verify_hash(user.get('token'), token_hashed):
+        shopping_cart_instance = db.query(models.ShoppingCart).filter(models.ShoppingCart.recipe_id == recipe_id).filter(models.ShoppingCart.user_id == user.get('id')).first()
+        print(shopping_cart_instance)
+        if shopping_cart_instance:
+            raise HTTPException(status_code=400, detail='Recipe have been already added to shopping cart')
         recipe = db.query(models.Recipe).get(recipe_id)
+        image = get_image_url(recipe.image_id, db)
         if recipe is None:
             raise HTTPException(status_code=400, detail='recipe not found')
         shopping_cart = models.ShoppingCart()
@@ -574,14 +595,14 @@ async def add_to_shopping_cart(
         recipe = ShortRecipe(
             id=recipe_id,
             name=recipe.name,
-            image=recipe.image,
+            image=image,
             cooking_time=recipe.cooking_time
         )
         return recipe
     raise HTTPException(status_code=403, detail='Unauthorized')
 
 
-@router.delete('/{recipe_id}/shopping_cart/')
+@router.delete('/{recipe_id}/shopping_cart/', status_code=status.HTTP_204_NO_CONTENT)
 async def delete_from_shopping_cart(
     recipe_id: int,
     user: dict = Security(get_user),
@@ -596,7 +617,7 @@ async def delete_from_shopping_cart(
             models.ShoppingCart.user_id == user.get('id')
         ).filter(models.ShoppingCart.recipe_id == recipe.id).first()
         if favorite is None:
-            raise HTTPException(status_code=400, detail='recipe is not in favorited')
+            raise HTTPException(status_code=400, detail='recipe is not in shopping cart')
         db.query(models.ShoppingCart).filter(
             models.ShoppingCart.user_id == user.get('id')
         ).filter(models.ShoppingCart.recipe_id == recipe.id).delete()

@@ -23,7 +23,7 @@ sys.path.append('..')
 from database import engine
 from models import Tag, Ingredient, Recipe, User
 from routers.auth import get_db
-from backend.routers.services.hash import verify_hash
+from routers.services.hash import verify_hash
  
 # app = Flask(__name__)
 
@@ -118,4 +118,4 @@ from backend.routers.services.hash import verify_hash
 # def load_user(user):
 #     return User.query.get(int(user))
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000)

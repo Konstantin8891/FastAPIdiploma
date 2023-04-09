@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from .auth import get_user, get_db, get_user_or_none, get_user_and_hashed_token
 from .services.pagination import Page, Params
-from services.hash import get_hash, verify_hash
+from .services.hash import get_hash, verify_hash
 
 import sys
 sys.path.append('..')
@@ -30,10 +30,11 @@ from schemas import (
 router = APIRouter(prefix='/api/users', tags=['users'])
 
 
-def get_is_subscribed(user: dict, db: Session):
+def get_is_subscribed(user: dict, user_id: int, db: Session):
     subscriber = db.query(models.Subscriber).filter(
-        models.Subscriber.author_id == user.get('id')
+        models.Subscriber.author_id == user_id
     ).filter(models.Subscriber.user_id == user.get('id')).first()
+    # print(subscriber)
     if subscriber is None:
         return False
     else:
@@ -45,6 +46,16 @@ def get_is_subscribed(user: dict, db: Session):
 )
 async def create_user(user: CreateUser, db: Session = Depends(get_db)):
     user_model = models.User()
+    if user.email == '':
+        raise HTTPException(status_code=400, detail='Email is required')
+    if user.username == '':
+        raise HTTPException(status_code=400, detail='Username is required')
+    if user.first_name == '':
+        raise HTTPException(status_code=400, detail='First name is required')
+    if user.last_name == '':
+        raise HTTPException(status_code=400, detail='Last name is required')
+    if user.password == '':
+        raise HTTPException(status_code=400, detail='Password is required')
     user_model.email = user.email
     user_model.username = user.username
     user_model.first_name = user.first_name
@@ -65,7 +76,10 @@ async def get_all_users(
     user: Optional[dict] = Security(get_user_or_none),
     db: Session = Depends(get_db)
 ):
-    _, token_hashed = get_user_and_hashed_token(db, user)
+    if user is not None:
+        _, token_hashed = get_user_and_hashed_token(db, user)
+    else:
+        token_hashed = None
     if not (token_hashed and verify_hash(user.get('token'), token_hashed)):
         user = None
     users = db.query(models.User).order_by(models.User.id).all()[
@@ -102,13 +116,14 @@ async def get_all_users(
         if user is None:
             sub_res['is_subscribed'] = False
         else:
-            subscription = db.query(models.Subscriber).filter(
-                models.Subscriber.user_id == user.get('id')
-            ).filter(models.Subscriber.author_id == user_instance.id).first()
-            if subscription is None:
-                sub_res['is_subscribed'] = False
-            else:
-                sub_res['is_subscribed'] = True
+            sub_res['is_subscribed'] = get_is_subscribed(user, user_instance.id, db)
+            # subscription = db.query(models.Subscriber).filter(
+            #     models.Subscriber.user_id == user.get('id')
+            # ).filter(models.Subscriber.author_id == user_instance.id).first()
+            # if subscription is None:
+            #     sub_res['is_subscribed'] = False
+            # else:
+            #     sub_res['is_subscribed'] = True
         result['results'].append(sub_res)
     return result
 
@@ -120,7 +135,7 @@ async def get_current_user(
     user_model, token_hashed = get_user_and_hashed_token(db, user)
     if token_hashed and verify_hash(user.get('token'), token_hashed):
         # user_model = db.query(models.User).get(user.get('id'))
-        is_subscribed = get_is_subscribed(user, db)
+        is_subscribed = get_is_subscribed(user, user.get('id'), db)
         return ViewUser(
             email=user_model.email,
             id=user_model.id,
@@ -145,7 +160,7 @@ async def get_all_subscriptions(
     if token_hashed and verify_hash(user.get('token'), token_hashed):
         authors = db.query(models.Subscriber).filter(
             models.Subscriber.user_id == user.get('id')
-        ).order_by(models.Subscriber.id).all()[
+        ).order_by(models.Subscriber.author_id).all()[
             ((page - 1) * limit):(page * limit)
         ]
         count = db.query(models.Subscriber).filter(models.Subscriber.user_id == user.get('id')).count()
@@ -179,17 +194,26 @@ async def get_all_subscriptions(
             sub_res['is_subscribed'] = True
             recipes = db.query(models.Recipe).filter(
                 models.Recipe.author_id == author.author_id
-            )
+            ).order_by(models.Recipe.id)
             if recipe_limit:
                 recipes = recipes[:recipe_limit]
             sub_res['recipes'] = []
             for recipe in recipes:
-                recipe_instance = ShortRecipe(
-                    id=recipe.id,
-                    name=recipe.name,
-                    image=recipe.image,
-                    cooking_time=recipe.cooking_time
-                )
+                if recipe.image_id:
+                    image = db.query(models.Image).get(recipe.image_id)
+                    recipe_instance = ShortRecipe(
+                        id=recipe.id,
+                        name=recipe.name,
+                        image=image.url,
+                        cooking_time=recipe.cooking_time
+                    )
+                else:
+                    recipe_instance = ShortRecipe(
+                        id=recipe.id,
+                        name=recipe.name,
+                        cooking_time=recipe.cooking_time
+                    )
+
                 sub_res['recipes'].append(recipe_instance)
             result['results'].append(sub_res)
         return result
@@ -207,7 +231,7 @@ async def get_user_by_id(
         user_model = db.query(models.User).filter(models.User.id == user_id).first()
         if user_model is None:
             raise HTTPException(status_code=400, detail='User does not exist')
-        is_subscribed = get_is_subscribed(user, db)
+        is_subscribed = get_is_subscribed(user, user_id, db)
         return ViewUser(
             email=user_model.email,
             id=user_model.id,
@@ -230,8 +254,10 @@ async def set_new_password(
         user_model = db.query(models.User).get(user.get('id'))
         if verify_hash(passwords.current_password, user_model.password):
             user_model.password = get_hash(passwords.new_password)
-        return 'changed'
-    raise HTTPException(status_code=403, detail='Unauthorized')
+            db.commit()
+            return 'changed'
+        raise HTTPException(status_code=400, detail='Check correctness of the data')
+    raise HTTPException(status_code=401, detail='Unauthorized')
 
 
 @router.post('/{author_id}/subscribe/', response_model=SubscribeUser)
@@ -279,7 +305,7 @@ async def get_subscribed(
             recipe_count=recipe_count
         )
         return user_instance
-    raise HTTPException(status_code=403, detail='Unauthorized')
+    raise HTTPException(status_code=401, detail='Unauthorized')
 
 
 @router.delete(

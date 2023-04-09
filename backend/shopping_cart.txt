@@ -1,2 +1,3 @@
-testname2: testingredient2 - 2
-testname2: testingredient1 - 1
+finaltest20: testingredient1 - 10
+finaltest20: testingredient2 - 10
+testname6: testingredient1 - 1

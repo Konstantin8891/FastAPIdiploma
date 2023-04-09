@@ -1,7 +1,7 @@
 from fastapi import HTTPException, Depends
 from sqlalchemy.orm import Session
 
-from backend.routers.services.hash import verify_hash
+from .hash import verify_hash
 
 import sys
 sys.path.append('...')

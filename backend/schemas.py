@@ -1,10 +1,11 @@
 from typing import Optional, Union, Any
 
-from pydantic import BaseModel
+from fastapi.exceptions import HTTPException
+from pydantic import BaseModel, validator, EmailStr, root_validator
 
 
 class CreateUser(BaseModel):
-    email: str
+    email: EmailStr
     username: str
     first_name: str
     last_name: str
@@ -82,6 +83,42 @@ class PostRecipes(BaseModel):
     class Config:
         orm_mode = True
 
+    @validator('ingredients', pre=True, always=True)
+    def validate_ingredients(cls, data):
+        if data is not None and data != '' and data != []:
+            return data
+        raise HTTPException(status_code=400, detail='Ingredients are required')
+    
+    @validator('tags', pre=True, always=True)
+    def validate_tags(cls, data):
+        if data is not None and data != '' and data != []:
+            return data
+        raise HTTPException(status_code=400, detail='Tags are required')
+
+    @validator('image', pre=True, always=True)
+    def validate_image(cls, data):
+        if data is not None and data != '':
+            return data
+        raise HTTPException(status_code=400, detail='Image is required')
+
+    @validator('name', pre=True, always=True)
+    def validate_name(cls, data):
+        if data is not None and data != '':
+            return data
+        raise HTTPException(status_code=400, detail='Name is required')
+    
+    @validator('text', pre=True, always=True)
+    def validate_text(cls, data):
+        if data is not None and data != '':
+            return data
+        raise HTTPException(status_code=400, detail='Text is required')
+         
+    @validator('cooking_time', pre=True, always=True, allow_reuse=True)
+    def validate_cooking_time(cls, data):
+        if data is not None and data != '':
+            return data
+        raise HTTPException(status_code=400, detail='Cooking time is required')
+
 
 class CreateToken(BaseModel):
     password: str
@@ -127,7 +164,7 @@ class ViewRecipes(BaseModel):
 class ShortRecipe(BaseModel):
     id: int
     name: str
-    image: Optional[str]
+    image: Optional[str] = None
     cooking_time: int
 
     class Config:

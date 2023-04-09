@@ -37,8 +37,11 @@ def get_db():
 
 
 def get_user_and_hashed_token(db: Session, user: dict):
+    # print(user)
     user_instance = db.query(models.User).get(user.get('id'))
-    token_hashed = redis_db.get(user.username).decode('utf-8')
+    token_hashed = redis_db.get(user_instance.username)
+    if token_hashed:
+        token_hashed = token_hashed.decode('utf-8')
     return user_instance, token_hashed
 
 
@@ -99,18 +102,22 @@ async def get_token(credentials: CreateToken, db: Session = Depends(get_db)):
     encode = {"sub": credentials.email, "id": user.id, "expired": False}
     expire = datetime.utcnow() + timedelta(minutes=60)
     encode.update({"exp": expire})
+    expire = timedelta(minutes=60).total_seconds() * 1000
+    expire = int(expire)
     token = jwt.encode(encode, SECRET_KEY, algorithm=ALGORITHM)
     token_hash = get_hash(token)
     redis_db.set(user.username, token_hash)
-    redis_db.setex(user.username, expire)
+    redis_db.setex(user.username, str(expire), token_hash)
     return {"auth_token": token}
 
 
 @router.post('/token/logout/', status_code=status.HTTP_204_NO_CONTENT)
 async def delete_token(user: dict = Security(get_user), db: Session = Depends(get_db)):
     user_instance, token_hashed = get_user_and_hashed_token(db, user)
+    if token_hashed is None:
+        raise HTTPException(status_code=401, detail='Unauthorized')
     if token_hashed and verify_hash(user.get('token'), token_hashed):
-        redis_db.setex(user_instance.username, datetime.utcnow())
+        redis_db.delete(user_instance.username)
 
     # encode = {"sub": user_.email, "id": user.id}
     # expire = datetime.utcnow()

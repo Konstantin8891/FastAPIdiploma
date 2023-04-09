@@ -12,7 +12,7 @@ import sys
 sys.path.append('..')
 
 # from models import User
-from backend.routers.services.hash import verify_hash
+from routers.services.hash import verify_hash
 
 
 def has_no_empty_params(rule):
