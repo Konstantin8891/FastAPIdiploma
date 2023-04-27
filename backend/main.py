@@ -2,6 +2,7 @@ import uvicorn
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.wsgi import WSGIMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.routing import Mount
 from fastapi.staticfiles import StaticFiles
@@ -11,6 +12,7 @@ from fastapi_pagination import add_pagination
 # from piccolo.engine import engine_finder
 
 # from admin.tables import PiccoloTag
+from admin import app as flask_app
 from database import SessionLocal
 from routers import users, tags, ingredients, recipes, auth
 
@@ -18,6 +20,10 @@ from routers import users, tags, ingredients, recipes, auth
 def configure_media(app): 
     # app.mount("/api/recipes/images", StaticFiles(directory="media"), name="media")
     app.mount("/media", StaticFiles(directory="media"), name="media")
+    app.mount(
+        "/admin/static", 
+        StaticFiles(directory="admin/static")
+    )
 
 def start_application():
     # app = FastAPI(routes=[Mount(path='/admin/', app=create_admin(
@@ -49,6 +55,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # idp.add_swagger_config(app)
 # app = FastAPI()
 app.mount("/media", StaticFiles(directory="media"), name="media")
+app.mount("/admin", WSGIMiddleware(flask_app))
 
 app.include_router(auth.router)
 app.include_router(users.router)

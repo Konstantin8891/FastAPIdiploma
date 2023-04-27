@@ -46,7 +46,7 @@ def create_app() -> Flask:
         # def secure_admin_index():
         #     return admin_index()
 
-    admin = Admin(app, name='Foodgram index', index_view=AdminIndexView(url='/admin/'), template_mode='bootstrap4')
+    admin = Admin(app, name='Foodgram index', index_view=AdminIndexView(url='/'), template_mode='bootstrap4')
 
     admin.add_view(UserView(User, current_session))
     admin.add_view(TagView(Tag, current_session))

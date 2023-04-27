@@ -29,7 +29,7 @@ def logout():
         # prevent flashing automatically logged out message
         del session['was_once_logged_in']
     flash('You have successfully logged yourself out.')
-    return redirect('/login')
+    return redirect(url_for('login'))
 
 
 @app.route('/login', methods=['GET', 'POST'])
