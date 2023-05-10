@@ -3,7 +3,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 
-SQLALCHEMY_DATABASE_URL = "postgresql://postgres:postgres@localhost/FastAPIdiploma_db"
+# SQLALCHEMY_DATABASE_URL = "postgresql://postgres:postgres@localhost/FastAPIdiploma_db"
+SQLALCHEMY_DATABASE_URL = "postgresql://postgres:postgres@postgres_db:5432/postgres"
 
 
 engine = create_engine(

@@ -10,13 +10,13 @@ from typing import Optional, List, Union
 
 from fastapi import APIRouter, Depends, status, Security, HTTPException, Request, Query
 from fastapi.responses import FileResponse
-from fastapi_pagination.ext.sqlalchemy import paginate
+# from fastapi_pagination.ext.sqlalchemy import paginate
 from sqlalchemy import delete
 from sqlalchemy.orm import Session, selectinload, load_only
 
 from .auth import get_db, get_user, get_user_or_none, get_user_and_hashed_token
 from .services.hash import get_hash, verify_hash
-from .services.pagination import Page, Params
+# from .services.pagination import Page, Params
 from .users import get_is_subscribed
 
 import sys

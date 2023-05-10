@@ -10,14 +10,18 @@ services:
     image: redis:7.0-alpine
     restart: always
     ports:
-      - '6379:6379'
+      - '6380:6379'
     env_file:
       - ./.env
     command: redis-server --requirepass REDIS_PASSWORD
     volumes: 
       - cache:/data
   backend:
-    image: konstantin05/fastapidiploma:latest
+    # image: konstantin05/fastapidiploma:latest
+    build: 
+      context: ../
+      dockerfile: ./backend/Dockerfile
+    # command: bash -c "alembic upgrade head"
     expose:
       - 8000
     restart: always

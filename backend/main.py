@@ -6,8 +6,8 @@ from fastapi.middleware.wsgi import WSGIMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.routing import Mount
 from fastapi.staticfiles import StaticFiles
-from fastapi_keycloak import FastAPIKeycloak, OIDCUser
-from fastapi_pagination import add_pagination
+# from fastapi_keycloak import FastAPIKeycloak, OIDCUser
+# from fastapi_pagination import add_pagination
 # from piccolo_admin.endpoints import create_admin
 # from piccolo.engine import engine_finder
 
@@ -59,7 +59,7 @@ app.mount("/admin", WSGIMiddleware(flask_app))
 
 app.include_router(auth.router)
 app.include_router(users.router)
-add_pagination(app)
+# add_pagination(app)
 app.include_router(tags.router)
 app.include_router(ingredients.router)
 app.include_router(recipes.router)

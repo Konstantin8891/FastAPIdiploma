@@ -1,11 +1,11 @@
 from typing import Optional
 
 from fastapi import APIRouter, status, Depends, HTTPException, Security, Request
-from fastapi_pagination import add_pagination
+# from fastapi_pagination import add_pagination
 from sqlalchemy.orm import Session
 
 from .auth import get_user, get_db, get_user_or_none, get_user_and_hashed_token
-from .services.pagination import Page, Params
+# from .services.pagination import Page, Params
 from .services.hash import get_hash, verify_hash
 
 import sys
