@@ -1,7 +1,13 @@
 from flask_login import current_user
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy_utils import EmailType, ChoiceType
 
 from admin import db, login_manager
+
+import sys
+sys.path.append('..')
+
+from routers.services.hash import get_hash
 
 
 @login_manager.user_loader

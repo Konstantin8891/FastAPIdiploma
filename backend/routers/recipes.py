@@ -132,7 +132,9 @@ async def create_recipe(
             image = models.Image(
                 name=recipe.name,
                 path=recipe.name.lower() + 'jpg',
-                url=f'http://{request.client.host}:{request.url.port}/media/'
+                # url=f'http://{request.client.host}:{request.url.port}/media/'
+                #     f'recipes/images/{recipe.name}.{ext}'
+                url=f'http://127.0.0.1/media/'
                     f'recipes/images/{recipe.name}.{ext}'
             )
             db.add(image)

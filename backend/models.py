@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from sqlalchemy import (
     Integer, String, Boolean, ForeignKey, Column, DateTime, func, Unicode
@@ -33,6 +34,10 @@ class User(Base):
     recipeuser = relationship('Recipe', back_populates='author')
     favorites = relationship('Favorite', back_populates='user_f')
     shoppingcart_u = relationship('ShoppingCart', back_populates='user_sc')
+
+    def __init__(self, password, *args: Any, **kwargs: Any) -> None:
+        self.password = password
+        super().__init__(*args, **kwargs)
 
     def __str__(self):
         return self.username

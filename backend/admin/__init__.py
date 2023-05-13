@@ -52,7 +52,7 @@ def create_app() -> Flask:
     admin.add_view(TagView(Tag, current_session))
     admin.add_view(IngredientView(Ingredient, current_session))
     admin.add_view(RecipeView(Recipe, current_session))
-    admin.add_sub_category(name="IngredientAmount", parent_name="Ingredient")
+    # admin.add_sub_category(name="IngredientAmount", parent_name="Ingredient")
 
     return cast(Flask, admin.app)
 
